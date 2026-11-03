@@ -1,3 +1,78 @@
+# Dental Canvas v1.4.28
+
+Released 2026-11-03.
+
+## A backup you can choose
+
+Your practice can now have an account, and it can just as easily not have one.
+First-run setup ends with an **Account** step offering **Sign up**, **Sign in**
+and a plain **Skip, keep data offline only** — and skipping is remembered, so
+you are never asked again. With no Supabase configuration at all, the step is
+not even drawn: the app is the same offline app it has always been, with no
+client created and no request attempted.
+
+A doctor who skipped can change their mind from **Settings → Account** at any
+time. The first sign-in uploads the practice that already exists on the device —
+patients, appointments, charting, notes and billing — without duplicating a row.
+Signing in on a second machine pulls that practice down and clears the demo seed
+rows a fresh install starts with, so the two devices hold the same clinic rather
+than two overlapping ones.
+
+## Sync that never gets in the way
+
+The screen you are looking at always reads and writes the local database, so
+nothing waits on a network. Behind it, SQL triggers queue every insert, update
+and delete in an outbox; the queue is pushed to your Supabase project when the
+app is online and signed in, and each table is pulled back by an `updated_at`
+cursor. Realtime gives the other device a nudge and a slow poll covers networks
+where it is blocked.
+
+- **Interruptions are safe.** Pushes are idempotent upserts keyed by a UUID, so
+  a sync cut off halfway simply resumes.
+- **Deletes travel.** Cloud deletes are tombstones, and a device that still
+  holds the old row cannot resurrect it.
+- **Edits on two devices resolve the same way every time:** last write wins, on
+  the server's timestamp. The version that lost is kept in a local conflicts
+  table with both payloads — never thrown away, never silently preferred.
+- **Row ids no longer collide.** Every syncable row gained a `sync_id` UUID
+  beside its integer key, backfilled by a migration that is idempotent and
+  leaves the existing keys and foreign keys alone, so an existing database
+  upgrades in place.
+- The app shell carries a small sync indicator: synced, syncing, offline or
+  error, with **Sync now** in Settings → Account.
+
+## Two doctors, one machine
+
+A shared clinic computer is the case that ruins naive sync. Signing out stops
+sync and keeps everything local — your rows, any queued edits, and this
+device's claim on the account that synced it — so the next person to sign in
+cannot upload the previous practice's patients into their own account. Signing
+back in as the same doctor resumes where sync stopped. Signing into a
+*different* account shows an opaque privacy screen; handing the device over
+requires typing **DELETE** to clear the local rows and the claim first.
+**Delete my cloud account and data** releases the claim and keeps the local
+records, so deleting the backup never deletes the practice.
+
+## Under the hood
+
+- **Cloud schema** — 37 mirrored tables with `user_id` foreign keys, indexes on
+  `(user_id, updated_at)`, server-side `updated_at` triggers, a `profiles` row
+  bootstrapped at sign-up, and Realtime enabled.
+- **Row Level Security** — RLS on every table with separate select, insert,
+  update and delete policies scoped to `auth.uid()`, and `anon` grants revoked.
+  A pgTAP test proves a second account can neither read nor modify the first's
+  data (`supabase test db`).
+- **Only the anon key in the client.** Account deletion runs in a
+  `delete-account` Edge Function that verifies the caller's JWT before touching
+  the service role, and there is no `VITE_*` variable for that key anywhere.
+- **Desktop note** — this build has no deep-link handler, so email-confirmation
+  and password-reset links open in your default browser. Confirm or reset
+  there, then sign in in the desktop app; the signed-in session itself persists
+  across restarts and refreshes automatically.
+- 400 tests pass, including outbox coalescing, tombstone propagation,
+  last-write-wins with a recorded loser, a resumable snapshot page, the
+  skip-onboarding path and the missing-env fallback.
+
 # Dental Canvas v1.4.27
 
 Released 2026-10-31.

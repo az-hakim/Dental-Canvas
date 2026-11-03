@@ -3,7 +3,7 @@
 All notable changes to this project will be documented in this file.
 See [Release process](docs/release-process.md) for how releases are cut.
 
-## v1.4.28 (unreleased)
+## v1.4.28
 
 - **Optional accounts & cloud sync** — doctors can sign up or sign in with
   email + password, or explicitly skip. Skipping is remembered, and the app
