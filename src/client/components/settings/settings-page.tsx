@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Plus, Trash2, Pencil, Check, X, Clock, UserRound, DatabaseBackup, Palette, Monitor, Sun, Moon, ImageUp, Mail, ReceiptText, MailCheck, QrCode, Printer, Link2, CircleDollarSign, Info, Download, Loader2, RefreshCw, Search, BellRing, Sparkles, FileText } from "lucide-react";
+import { Plus, Trash2, Pencil, Check, X, Clock, UserRound, DatabaseBackup, Palette, Monitor, Sun, Moon, ImageUp, Mail, ReceiptText, MailCheck, QrCode, Printer, Link2, CircleDollarSign, Info, Download, Loader2, RefreshCw, Search, BellRing, Sparkles, FileText, Cloud } from "lucide-react";
 import { useApp } from "@/context";
 import { api } from "@/api";
 import { toast } from "@/components/ui/toast";
@@ -8,6 +8,7 @@ import { UpdateCard } from "./app-update-card";
 import { BookingTab } from "./booking-tab";
 import { RxTemplatesTab } from "./rx-templates-tab";
 import { StorageTab } from "./storage-tab";
+import { AccountPanel } from "@/components/account/account-panel";
 import { StartupCard } from "./startup-card";
 import { PageHeader, PageShell } from "@/components/page-shell";
 import { ToothGlyph } from "@/components/dental-art";
@@ -53,6 +54,9 @@ export function SettingsPage() {
               added later — picks it up from the list alone. */}
           <TabsList className="dc-tabbar flex h-auto w-full flex-wrap justify-start gap-1 rounded-2xl border border-border/60 bg-card/70 p-1.5 shadow-sm backdrop-blur">
             <TabsTrigger value="profile">Profile</TabsTrigger>
+            <TabsTrigger value="account" className="gap-1.5">
+              <Cloud className="h-3.5 w-3.5" /> Account
+            </TabsTrigger>
             <TabsTrigger value="appearance">Appearance</TabsTrigger>
             <TabsTrigger value="operatories">Operatories</TabsTrigger>
             <TabsTrigger value="practitioners">Practitioners</TabsTrigger>
@@ -86,6 +90,9 @@ export function SettingsPage() {
           </TabsList>
           <TabsContent value="profile" className="mt-4">
             <ProfileTab />
+          </TabsContent>
+          <TabsContent value="account" className="mt-4">
+            <AccountPanel />
           </TabsContent>
           <TabsContent value="appearance" className="mt-4 space-y-4">
             <AppearanceTab />

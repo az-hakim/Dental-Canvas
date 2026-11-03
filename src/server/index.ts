@@ -61,6 +61,23 @@ import {
   storageUrlForFile,
   validateStorageInput,
 } from "./storage";
+import { syncTable } from "../shared/sync-schema";
+import {
+  ackChanges,
+  applyRemoteChanges,
+  claimSyncOwner,
+  ensureSyncReady,
+  getLocalDataSummary,
+  getPendingChanges,
+  getSnapshotChunk,
+  getSyncMeta,
+  listConflicts,
+  prepareLocalForPull,
+  recordSyncConflict,
+  releaseSyncOwner,
+  forgetSyncOwner,
+  wipeLocalData,
+} from "./sync";
 
 type Env = { Bindings: { DB: D1Database } };
 
@@ -544,8 +561,11 @@ async function ensureMigrated(): Promise<void> {
 }
 
 app.use("*", async (_c, next) => {
-  await ensureSeeded();
   await ensureMigrated();
+  // Sync bookkeeping must exist before the first seed INSERT so those rows get
+  // their sync ids and land in the outbox like every later write.
+  await ensureSyncReady().catch(() => undefined);
+  await ensureSeeded();
   await next();
 });
 
@@ -5564,6 +5584,143 @@ app.post("/api/public/booking/:token", async (c) => {
     [link.id, appt.lastInsertRowid, d.first_name, d.last_name, d.phone ?? null, d.email ?? null, d.start_time, d.treatment_type_id ?? null],
   );
   return c.json({ ok: true, appointment_id: appt.lastInsertRowid }, 201);
+});
+
+// ── Cloud sync bookkeeping (see src/server/sync.ts) ─────────────────
+// These endpoints expose the local outbox/snapshot/apply surface. They never
+// talk to Supabase themselves: the browser owns the auth session and pushes
+// with the anon key + RLS.
+
+app.get("/api/sync/meta", async (c) => {
+  return c.json(await getSyncMeta());
+});
+
+const ClaimInput = z.object({ user_id: z.string().min(10) });
+
+app.post("/api/sync/claim", async (c) => {
+  const parsed = await parseJson(c, ClaimInput);
+  if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+  const result = await claimSyncOwner(parsed.data.user_id);
+  if (!result.ok) {
+    return c.json(
+      {
+        error:
+          "This device already holds data linked to a different account. Sign out and remove local data first, or use the original account.",
+        code: result.reason,
+        owner_user_id: result.owner_user_id,
+      },
+      409,
+    );
+  }
+  return c.json(result);
+});
+
+app.post("/api/sync/release", async (c) => {
+  await releaseSyncOwner();
+  return c.json({ ok: true });
+});
+
+// Explicit account deletion only: unclaim the device while keeping its rows.
+app.post("/api/sync/forget", async (c) => {
+  await forgetSyncOwner();
+  return c.json({ ok: true });
+});
+
+app.get("/api/sync/pending", async (c) => {
+  const limit = Math.min(Math.max(intParam(c.req.query("limit")) ?? 250, 1), 1000);
+  return c.json(await getPendingChanges(limit));
+});
+
+const AckInput = z.object({
+  ids: z.array(z.number().int().nonnegative()).max(2000),
+  pushed: z.boolean().optional(),
+});
+
+app.post("/api/sync/ack", async (c) => {
+  const parsed = await parseJson(c, AckInput);
+  if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+  await ackChanges(parsed.data.ids, parsed.data.pushed !== false);
+  return c.json({ ok: true });
+});
+
+app.get("/api/sync/snapshot", async (c) => {
+  const entity = c.req.query("entity") ?? "";
+  if (!syncTable(entity)) return c.json({ error: `Unknown sync table: ${entity}` }, 400);
+  const after = Math.max(intParam(c.req.query("after")) ?? 0, 0);
+  const limit = Math.min(Math.max(intParam(c.req.query("limit")) ?? 250, 1), 1000);
+  return c.json(await getSnapshotChunk(entity, after, limit));
+});
+
+const ApplyInput = z.object({
+  changes: z
+    .array(
+      z.object({
+        entity: z.string().min(1),
+        op: z.enum(["upsert", "delete"]),
+        row: z.record(z.unknown()).optional(),
+      }),
+    )
+    .max(1000),
+  push: z.boolean().optional(),
+  cursors: z
+    .record(
+      z.object({
+        updated_at: z.string().min(1),
+        sync_id: z.string().nullable(),
+      }),
+    )
+    .optional(),
+});
+
+app.post("/api/sync/apply", async (c) => {
+  const parsed = await parseJson(c, ApplyInput);
+  if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+  const result = await applyRemoteChanges(parsed.data.changes, {
+    push: parsed.data.push === true,
+    cursors: parsed.data.cursors,
+  });
+  return c.json(result);
+});
+
+const ConflictInput = z.object({
+  entity: z.string().min(1),
+  sync_id: z.string().nullable(),
+  resolution: z.string().min(1),
+  local: z.unknown().optional(),
+  remote: z.unknown().optional(),
+});
+
+app.post("/api/sync/conflict", async (c) => {
+  const parsed = await parseJson(c, ConflictInput);
+  if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+  if (!syncTable(parsed.data.entity)) return c.json({ error: "Unknown sync table" }, 400);
+  await recordSyncConflict(
+    parsed.data.entity,
+    parsed.data.sync_id,
+    parsed.data.resolution,
+    parsed.data.local,
+    parsed.data.remote,
+  );
+  return c.json({ ok: true });
+});
+
+app.get("/api/sync/conflicts", async (c) => {
+  return c.json({ conflicts: await listConflicts(intParam(c.req.query("limit")) ?? 50) });
+});
+
+app.get("/api/sync/summary", async (c) => {
+  return c.json(await getLocalDataSummary());
+});
+
+app.post("/api/sync/prepare-pull", async (c) => {
+  return c.json(await prepareLocalForPull());
+});
+
+app.post("/api/sync/wipe", async (c) => {
+  const parsed = await parseJson(c, z.object({ confirm: z.literal("DELETE") }));
+  if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+  await wipeLocalData();
+  return c.json({ ok: true });
 });
 
 /** Booking requests feed (for the front desk) — newest first. */

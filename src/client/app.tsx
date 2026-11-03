@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { reportLocation } from "@clawnify/app/client";
 import { useAppState } from "./hooks/use-app-state";
+import { useAuth } from "./auth";
+import { shouldOfferAccountStep } from "./lib/account-mode";
 import { useRouter } from "./hooks/use-router";
 import { AppContext } from "./context";
 import { Sidebar } from "./components/sidebar";
@@ -41,12 +43,23 @@ import { SettingsPage } from "./components/settings/settings-page";
 import { WhatsNewPage } from "./components/whats-new/whats-new-page";
 import { FinancePage } from "./components/finance/finance-page";
 import { PrescriptionSharePage } from "./components/prescriptions/prescription-share-page";
+import { AccountFirstRun } from "./components/account/account-first-run";
+import { AccountConflictScreen } from "./components/account/account-conflict-screen";
+import { PasswordRecoveryDialog } from "./components/account/password-recovery-dialog";
 
 export function App() {
   const state = useAppState();
+  const auth = useAuth();
   const { path, route, navigate } = useRouter();
   const [searchOpen, setSearchOpen] = useState(false);
   const [registerOpen, setRegisterOpen] = useState(false);
+
+  // Fresh browser/PWA install: offer the optional account once. Desktop gets
+  // the same offer as the final setup-wizard step, so it is excluded here.
+  const showAccountFirstRun =
+    !isTauriDesktop() &&
+    !state.loading &&
+    shouldOfferAccountStep(auth.accountMode, auth.cloudAvailable);
 
   // First-run setup wizard (desktop only): on a fresh offline install the
   // profile is empty — no doctor name, no clinic name — and the whole app
@@ -184,6 +197,8 @@ export function App() {
       <AppContext.Provider value={state}>
         <KioskPage />
         <ErrorBanner />
+        <AccountConflictScreen />
+        <PasswordRecoveryDialog />
       </AppContext.Provider>
     );
   }
@@ -196,10 +211,17 @@ export function App() {
   return (
     <AppContext.Provider value={state}>
       {showWizard && <SetupWizard onDone={completeWizard} />}
+      {showAccountFirstRun && !showWizard && (
+        <AccountFirstRun
+          onDone={() => {
+            if (auth.accountMode === "unset") auth.setAccountMode("offline");
+          }}
+        />
+      )}
       <div className="flex h-screen min-h-0 flex-col md:flex-row overflow-hidden">
         {/* Skip link: first focusable element on every page for keyboard users. */}
         <a href="#main-content" className="skip-link">Skip to main content</a>
-        {!isPrintRoute && <MobileTopBar onOpenSearch={openSearch} />}
+        {!isPrintRoute && <MobileTopBar onOpenSearch={openSearch} navigate={navigate} />}
         <div className="flex min-h-0 flex-1 overflow-hidden">
           <Sidebar route={route} navigate={navigate} onOpenSearch={openSearch} />
           <main id="main-content" className="flex flex-1 flex-col overflow-hidden">
@@ -245,6 +267,8 @@ export function App() {
         <Toaster />
       </div>
       <SearchPalette open={searchOpen} onOpenChange={setSearchOpen} navigate={navigate} />
+      <AccountConflictScreen />
+      <PasswordRecoveryDialog />
       <PatientDialog
         open={registerOpen}
         onOpenChange={setRegisterOpen}

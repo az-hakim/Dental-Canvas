@@ -4,6 +4,7 @@ import {
   ArrowRight,
   Building2,
   Check,
+  Cloud,
   FolderSync,
   Loader2,
   ShieldCheck,
@@ -11,6 +12,8 @@ import {
   Stethoscope,
 } from "lucide-react";
 import { useApp } from "@/context";
+import { useAuth } from "@/auth";
+import { AccountStep } from "@/components/account/account-step";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -51,14 +54,22 @@ const STEPS = [
   // Only rendered when folder backup is supported (desktop WebView2); the
   // progress row filters it out otherwise.
   { id: 3, title: "Safety net", icon: FolderSync },
+  // Optional cloud account. Hidden entirely when this build has no Supabase
+  // env vars, so the app never shows a dead account screen.
+  { id: 4, title: "Account", icon: Cloud },
 ] as const;
+
+type StepId = 1 | 2 | 3 | 4;
 
 export function SetupWizard({ onDone }: { onDone: () => void }) {
   const { updateProfile } = useApp();
+  const auth = useAuth();
   const backupSupported = isDesktopBackupSupported();
-  const steps = backupSupported ? STEPS : STEPS.filter((s) => s.id !== 3);
-  const lastStep = steps[steps.length - 1].id;
-  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const withoutBackup = backupSupported ? STEPS : STEPS.filter((s) => s.id !== 3);
+  const steps = auth.cloudAvailable
+    ? withoutBackup
+    : withoutBackup.filter((s) => s.id !== 4);
+  const [step, setStep] = useState<StepId>(1);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Step 3 state: picking the folder writes the first backup immediately, so
@@ -98,22 +109,47 @@ export function SetupWizard({ onDone }: { onDone: () => void }) {
     }
   }
 
+  async function saveDraft(): Promise<void> {
+    // Only send non-empty fields — skipping optional ones keeps any existing
+    // defaults (e.g. specialty) intact.
+    const patch: Partial<ProfileSettings> = {};
+    for (const [k, v] of Object.entries(draft)) {
+      if (v.trim() !== "") patch[k as keyof ProfileSettings] = v.trim();
+    }
+    await updateProfile(patch);
+  }
+
   async function finish() {
     setSaving(true);
     setError(null);
     try {
-      // Only send non-empty fields — skipping optional ones keeps any
-      // existing defaults (e.g. specialty) intact.
-      const patch: Partial<ProfileSettings> = {};
-      for (const [k, v] of Object.entries(draft)) {
-        if (v.trim() !== "") patch[k as keyof ProfileSettings] = v.trim();
-      }
-      await updateProfile(patch);
+      await saveDraft();
       onDone();
     } catch (err) {
       setError((err as Error).message || "Saving failed — try again.");
       setSaving(false);
     }
+  }
+
+  const stepIndex = steps.findIndex((s) => s.id === step);
+  const nextStep = (steps[stepIndex + 1]?.id ?? null) as StepId | null;
+  const prevStep = (steps[stepIndex - 1]?.id ?? null) as StepId | null;
+
+  /** Save the profile before the account step so sign-up metadata has a name. */
+  async function goNext() {
+    setError(null);
+    if (step === 2) {
+      setSaving(true);
+      try {
+        await saveDraft();
+      } catch (err) {
+        setError((err as Error).message || "Saving failed — try again.");
+        setSaving(false);
+        return;
+      }
+      setSaving(false);
+    }
+    if (nextStep) setStep(nextStep);
   }
 
   return (
@@ -139,9 +175,7 @@ export function SetupWizard({ onDone }: { onDone: () => void }) {
             Let&apos;s set up your practice
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {backupSupported
-              ? "Three quick steps — everything can be changed later in Settings."
-              : "Two quick steps — you can change everything later in Settings →\n            Profile."}
+            A few quick steps — everything can be changed later in Settings.
           </p>
           {/* Progress dots */}
           <div className="mt-5 flex items-center gap-2">
@@ -167,7 +201,7 @@ export function SetupWizard({ onDone }: { onDone: () => void }) {
                 >
                   {s.title}
                 </span>
-                {i < STEPS.length - 1 && (
+                {i < steps.length - 1 && (
                   <div className="h-px w-10 bg-border" role="separator" />
                 )}
               </div>
@@ -314,6 +348,23 @@ export function SetupWizard({ onDone }: { onDone: () => void }) {
             </div>
           )}
 
+          {step === 4 && (
+            <div className="space-y-4">
+              <div className="flex items-start gap-3 rounded-lg border bg-muted/30 p-4">
+                <Cloud className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+                <div className="min-w-0 text-sm">
+                  <p className="font-medium">Back up and sync across devices (optional)</p>
+                  <p className="mt-1 text-muted-foreground">
+                    Your practice keeps working offline either way. An account backs up
+                    patients, appointments and billing to your own Supabase project, so a
+                    new computer can pick up where you left off.
+                  </p>
+                </div>
+              </div>
+              <AccountStep onDone={onDone} compact />
+            </div>
+          )}
+
           {error && (
             <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800 dark:border-rose-800 dark:bg-rose-950/60 dark:text-rose-200">
               {error}
@@ -325,23 +376,26 @@ export function SetupWizard({ onDone }: { onDone: () => void }) {
         <div className="flex items-center justify-between border-t px-8 py-4">
           <Button
             variant="ghost"
-            onClick={() => (step === 1 ? onDone() : setStep((step - 1) as 1 | 2))}
+            onClick={() => (prevStep ? setStep(prevStep) : onDone())}
             disabled={saving}
           >
-            {step === 1 ? (
-              "Skip for now"
-            ) : (
+            {prevStep ? (
               <>
                 <ArrowLeft className="h-4 w-4" /> Back
               </>
+            ) : (
+              "Skip for now"
             )}
           </Button>
-          {step < lastStep ? (
-            <Button onClick={() => setStep((step + 1) as 2 | 3)} disabled={!doctorOk || saving}>
+          {step === 4 ? null : nextStep ? (
+            <Button
+              onClick={() => void goNext()}
+              disabled={!doctorOk || (step === 2 && !clinicOk) || saving}
+            >
               Next <ArrowRight className="h-4 w-4" />
             </Button>
           ) : (
-            <Button onClick={finish} disabled={!clinicOk || saving}>
+            <Button onClick={() => void finish()} disabled={!clinicOk || saving}>
               {saving ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" /> Saving…

@@ -378,8 +378,9 @@ describe("follow-up worklists", () => {
     const a = jsonRequest("POST", "/api/appointments", {
       patient_id: patientId,
       operatory_id: operatoryId,
-      start_time: "2026-11-01T09:00:00",
-      end_time: "2026-11-01T10:00:00",
+      // Far future so the test stays "upcoming" regardless of the calendar.
+      start_time: "2099-11-01T09:00:00",
+      end_time: "2099-11-01T10:00:00",
     });
     await app.request(a.path, a.init, { DB: ctx.db });
 

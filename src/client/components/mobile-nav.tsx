@@ -21,6 +21,7 @@ import { openQuickRegister } from "@/lib/quick-register";
 import { useTheme } from "@/hooks/use-theme";
 import { ToothGlyph } from "@/components/dental-art";
 import { lastFinanceTabPath } from "@/lib/finance-tab";
+import { SyncIndicator } from "@/components/account/sync-indicator";
 import type { Route } from "@/hooks/use-router";
 
 /**
@@ -73,7 +74,7 @@ const MORE_ITEMS: NavItem[] = [
   { label: "Settings", icon: Settings, path: "/settings", match: (r) => r.name === "settings" },
 ];
 
-export function MobileTopBar({ onOpenSearch }: { onOpenSearch?: () => void }) {
+export function MobileTopBar({ onOpenSearch, navigate }: { onOpenSearch?: () => void; navigate: (to: string) => void }) {
   const { pref: theme, cycleTheme } = useTheme();
 
   return (
@@ -82,6 +83,7 @@ export function MobileTopBar({ onOpenSearch }: { onOpenSearch?: () => void }) {
         <ToothGlyph className="h-4 w-4" />
       </div>
       <span className="flex-1 truncate text-sm font-semibold tracking-tight">Dental Canvas</span>
+      <SyncIndicator compact onOpenSettings={() => navigate("/settings")} />
       <button
         type="button"
         onClick={cycleTheme}

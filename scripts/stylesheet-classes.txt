@@ -6,8 +6,8 @@
 # @source roots in src/client/styles.css (they must stay src/ and
 # index.html) and look for stray files inside src/.
 #
-# source: main @ 2e4ad78 (2026-10-30)
-# classes: 1614
+# source: main @ f8b94b6 (2026-10-31)
+# classes: 1621
 -bottom-10
 -bottom-6
 -bottom-9
@@ -218,6 +218,7 @@ border-amber-100
 border-amber-200
 border-amber-300
 border-amber-300/50
+border-amber-300/60
 border-amber-400
 border-amber-50
 border-amber-500
@@ -582,6 +583,7 @@ dark:border-violet-800
 dark:border-violet-900
 dark:hover:bg-emerald-900
 dark:hover:bg-pink-950/70
+dark:hover:bg-rose-950/40
 dark:hover:bg-sky-950/60
 dark:opacity-75
 dark:ring-amber-100
@@ -848,6 +850,7 @@ force-scrollbar
 from-primary
 from-primary/10
 from-primary/15
+from-rose-500/10
 from-sky-500
 gap-0
 gap-0.5
@@ -938,6 +941,7 @@ hover:bg-primary/90
 hover:bg-primary/[0.04]
 hover:bg-primary/[0.05]
 hover:bg-primary/[0.07]
+hover:bg-rose-50
 hover:bg-rose-500/10
 hover:bg-secondary/80
 hover:bg-sidebar-accent
@@ -948,6 +952,7 @@ hover:bg-white/20
 hover:border-muted-foreground/30
 hover:border-primary/15
 hover:border-primary/30
+hover:border-primary/40
 hover:border-teal-500
 hover:no-underline
 hover:opacity-100
@@ -1172,6 +1177,7 @@ py-2
 py-2.5
 py-3
 py-4
+py-5
 py-6
 py-8
 relative
@@ -1334,6 +1340,7 @@ sm:hidden
 sm:inline
 sm:inline-flex
 sm:items-center
+sm:items-end
 sm:justify-between
 sm:justify-end
 sm:max-h-[44vh]

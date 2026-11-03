@@ -22,6 +22,7 @@ import { useTheme, type ThemePreference } from "@/hooks/use-theme";
 import { ToothGlyph } from "@/components/dental-art";
 import type { Route } from "@/hooks/use-router";
 import { lastFinanceTabPath } from "@/lib/finance-tab";
+import { SyncIndicator } from "@/components/account/sync-indicator";
 
 interface NavItem {
   label: string;
@@ -160,6 +161,7 @@ export function Sidebar({
       </nav>
 
       <div className="flex shrink-0 flex-col items-center gap-1 border-t border-sidebar-border/60 p-2">
+        <SyncIndicator onOpenSettings={() => navigate("/settings")} />
         <button
           type="button"
           onClick={() => onOpenSearch?.()}

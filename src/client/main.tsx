@@ -1,5 +1,6 @@
 import { createRoot } from "react-dom/client";
 import { App } from "./app";
+import { AuthProvider } from "./auth";
 import { activateOfflineMode, isTauriDesktop, flushDatabase, watchForUpdates } from "./offline/activate";
 import {
   isInPageOfflineMode,
@@ -43,7 +44,11 @@ function showFatalScreen(title: string, detail: string, showRetry: boolean): voi
 }
 
 const mount = () => {
-  createRoot(appEl).render(<App />);
+  createRoot(appEl).render(
+    <AuthProvider>
+      <App />
+    </AuthProvider>,
+  );
 };
 
 if (isTauriDesktop()) {

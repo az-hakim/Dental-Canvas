@@ -6,6 +6,17 @@ dist
 .DS_Store
 *.log
 .dev.vars
+
+# Local Supabase credentials / build-time cloud config. `.env.example` is the
+# only env file that belongs in git.
+.env
+.env.*
+!.env.example
+
+# Supabase CLI local state (docker volumes, linked project ref, temp keys).
+supabase/.temp/
+supabase/.branches/
+supabase/.env
 src-tauri/target
 src-tauri/gen/schemas
 
