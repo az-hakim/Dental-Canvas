@@ -3,6 +3,17 @@
 All notable changes to this project will be documented in this file.
 See [Release process](docs/release-process.md) for how releases are cut.
 
+## v1.4.29
+
+- **Settings are split into Basic and Advanced** — the page opens on the five
+  tabs a clinic uses every day (Profile, Appearance, Hours, Notifications,
+  Billing) instead of drawing all sixteen at once. A Basic/Advanced switch
+  reveals the rest — Account, Operatories, Practitioners, Treatment types,
+  Consent forms, Online booking, Email, Rx templates, Storage, Backup and
+  About — in the same tab bar, set apart from the basics by a divider.
+- **The choice is remembered** per device, and switching back to Basic returns
+  to Profile instead of leaving a now-hidden tab selected.
+
 ## v1.4.28
 
 - **Optional accounts & cloud sync** — doctors can sign up or sign in with
