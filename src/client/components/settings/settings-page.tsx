@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { Plus, Trash2, Pencil, Check, X, Clock, UserRound, DatabaseBackup, Palette, Monitor, Sun, Moon, ImageUp, Mail, ReceiptText, MailCheck, QrCode, Printer, Link2, CircleDollarSign, Info, Download, Loader2, RefreshCw, Search, BellRing, Sparkles, FileText, Cloud } from "lucide-react";
 import { useApp } from "@/context";
 import { api } from "@/api";
@@ -36,7 +36,72 @@ import { INVOICE_STYLES, InvoiceSheet, type InvoiceStyle } from "@/components/pa
 const COLOR_TOKENS = ["sky", "emerald", "amber", "rose", "violet", "fuchsia", "teal", "orange", "slate"] as const;
 const ROLES: PractitionerRole[] = ["dentist", "hygienist", "assistant"];
 
+// ── Basic / Advanced settings ──────────────────────────────────
+// Sixteen tabs made every setting feel equally urgent. Basic is the daily
+// clinic setup a front desk touches; Advanced adds the technical and one-off
+// screens. Advanced reveals every tab (the basics stay put, so switching does
+// not hide the page you were on).
+
+type SettingsScope = "basic" | "advanced";
+
+type SettingsTab = {
+  value: string;
+  label: string;
+  icon?: typeof Monitor;
+  scope: SettingsScope;
+};
+
+const SETTINGS_TABS: SettingsTab[] = [
+  { value: "profile", label: "Profile", scope: "basic" },
+  { value: "appearance", label: "Appearance", scope: "basic" },
+  { value: "hours", label: "Hours", scope: "basic" },
+  { value: "notifications", label: "Notifications", icon: BellRing, scope: "basic" },
+  { value: "billing", label: "Billing", icon: ReceiptText, scope: "basic" },
+  { value: "account", label: "Account", icon: Cloud, scope: "advanced" },
+  { value: "operatories", label: "Operatories", scope: "advanced" },
+  { value: "practitioners", label: "Practitioners", scope: "advanced" },
+  { value: "treatments", label: "Treatment types", scope: "advanced" },
+  { value: "consents", label: "Consent forms", scope: "advanced" },
+  { value: "booking", label: "Online booking", icon: Link2, scope: "advanced" },
+  { value: "email", label: "Email", icon: Mail, scope: "advanced" },
+  { value: "rx-templates", label: "Rx templates", icon: FileText, scope: "advanced" },
+  { value: "storage", label: "Storage", icon: ImageUp, scope: "advanced" },
+  { value: "backup", label: "Backup", icon: DatabaseBackup, scope: "advanced" },
+  { value: "about", label: "About", icon: Info, scope: "advanced" },
+];
+
+const BASIC_TABS = new Set(SETTINGS_TABS.filter((t) => t.scope === "basic").map((t) => t.value));
+const SCOPE_KEY = "dental-canvas:settings-scope";
+
+function readScope(): SettingsScope {
+  try {
+    return localStorage.getItem(SCOPE_KEY) === "advanced" ? "advanced" : "basic";
+  } catch {
+    return "basic";
+  }
+}
+
 export function SettingsPage() {
+  const [scope, setScopeState] = useState<SettingsScope>(readScope);
+  const [tab, setTab] = useState("profile");
+
+  function setScope(next: SettingsScope) {
+    setScopeState(next);
+    try {
+      localStorage.setItem(SCOPE_KEY, next);
+    } catch {
+      /* storage unavailable — the choice still holds for this session */
+    }
+  }
+
+  // Basic mode does not draw an advanced trigger, so a tab left over from
+  // Advanced would have no trigger to return to (and no content to show).
+  useEffect(() => {
+    if (scope === "basic" && !BASIC_TABS.has(tab)) setTab("profile");
+  }, [scope, tab]);
+
+  const visibleTabs = SETTINGS_TABS.filter((t) => scope === "advanced" || t.scope === "basic");
+
   return (
     <PageShell>
       <PageHeader
@@ -46,47 +111,53 @@ export function SettingsPage() {
         description="The profile, schedule and money rules behind every chart, letterhead and invoice."
       />
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-8 md:px-6">
-        <Tabs defaultValue="profile">
-          {/* Scrollable tab bar: 13+ tabs overflow on narrow windows, so the
-              list wraps instead of clipping (and scrolls horizontally as a
+        <Tabs value={tab} onValueChange={setTab}>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div
+              role="group"
+              aria-label="Settings level"
+              className="flex items-center gap-1 rounded-full border border-border/60 bg-card/70 p-1 shadow-sm backdrop-blur"
+            >
+              {(["basic", "advanced"] as const).map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setScope(s)}
+                  aria-pressed={scope === s}
+                  className={cn(
+                    "rounded-full px-3.5 py-1.5 text-xs font-medium transition-colors",
+                    scope === s
+                      ? "bg-primary text-primary-foreground shadow-sm"
+                      : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                  )}
+                >
+                  {s === "basic" ? "Basic" : "Advanced"}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {scope === "basic"
+                ? "Everyday clinic setup. Switch to Advanced for booking, email, storage and backups."
+                : "Every setting, including the technical and one-off screens."}
+            </p>
+          </div>
+          {/* Scrollable tab bar: the whole set overflows on narrow windows, so
+              the list wraps instead of clipping (and scrolls horizontally as a
               last resort on very small screens). The pill styling lives in
               styles.css (.dc-tabbar) so every trigger — including the ones
               added later — picks it up from the list alone. */}
           <TabsList className="dc-tabbar flex h-auto w-full flex-wrap justify-start gap-1 rounded-2xl border border-border/60 bg-card/70 p-1.5 shadow-sm backdrop-blur">
-            <TabsTrigger value="profile">Profile</TabsTrigger>
-            <TabsTrigger value="account" className="gap-1.5">
-              <Cloud className="h-3.5 w-3.5" /> Account
-            </TabsTrigger>
-            <TabsTrigger value="appearance">Appearance</TabsTrigger>
-            <TabsTrigger value="operatories">Operatories</TabsTrigger>
-            <TabsTrigger value="practitioners">Practitioners</TabsTrigger>
-            <TabsTrigger value="treatments">Treatment types</TabsTrigger>
-            <TabsTrigger value="consents">Consent forms</TabsTrigger>
-            <TabsTrigger value="hours">Hours</TabsTrigger>
-            <TabsTrigger value="notifications" className="gap-1.5">
-              <BellRing className="h-3.5 w-3.5" /> Notifications
-            </TabsTrigger>
-            <TabsTrigger value="booking" className="gap-1.5">
-              <Link2 className="h-3.5 w-3.5" /> Online booking
-            </TabsTrigger>
-            <TabsTrigger value="email" className="gap-1.5">
-              <Mail className="h-3.5 w-3.5" /> Email
-            </TabsTrigger>
-            <TabsTrigger value="billing" className="gap-1.5">
-              <ReceiptText className="h-3.5 w-3.5" /> Billing
-            </TabsTrigger>
-            <TabsTrigger value="rx-templates" className="gap-1.5">
-              <FileText className="h-3.5 w-3.5" /> Rx templates
-            </TabsTrigger>
-            <TabsTrigger value="storage" className="gap-1.5">
-              <ImageUp className="h-3.5 w-3.5" /> Storage
-            </TabsTrigger>
-            <TabsTrigger value="backup" className="gap-1.5">
-              <DatabaseBackup className="h-3.5 w-3.5" /> Backup
-            </TabsTrigger>
-            <TabsTrigger value="about" className="gap-1.5">
-              <Info className="h-3.5 w-3.5" /> About
-            </TabsTrigger>
+            {visibleTabs.map((t, i) => (
+              <Fragment key={t.value}>
+                {i > 0 && t.scope === "advanced" && visibleTabs[i - 1].scope === "basic" && (
+                  <span className="mx-1 h-6 w-px self-center bg-border/70" aria-hidden />
+                )}
+                <TabsTrigger value={t.value} className={t.icon ? "gap-1.5" : undefined}>
+                  {t.icon ? <t.icon className="h-3.5 w-3.5" /> : null}
+                  {t.label}
+                </TabsTrigger>
+              </Fragment>
+            ))}
           </TabsList>
           <TabsContent value="profile" className="mt-4">
             <ProfileTab />
