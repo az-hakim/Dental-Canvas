@@ -7,6 +7,10 @@ dist
 *.log
 .dev.vars
 
+# Agent scratch space: local logs, generated keys/passwords, CLI output. It
+# holds real credentials during local Supabase work, so it never goes to git.
+.freebuff/
+
 # Local Supabase credentials / build-time cloud config. `.env.example` is the
 # only env file that belongs in git.
 .env

@@ -4,6 +4,7 @@ import { useApp } from "@/context";
 import { api } from "@/api";
 import { toast } from "@/components/ui/toast";
 import { BackupTab } from "./backup-tab";
+import { SyncTab } from "./sync-tab";
 import { UpdateCard } from "./app-update-card";
 import { BookingTab } from "./booking-tab";
 import { RxTemplatesTab } from "./rx-templates-tab";
@@ -58,6 +59,7 @@ const SETTINGS_TABS: SettingsTab[] = [
   { value: "notifications", label: "Notifications", icon: BellRing, scope: "basic" },
   { value: "billing", label: "Billing", icon: ReceiptText, scope: "basic" },
   { value: "account", label: "Account", icon: Cloud, scope: "advanced" },
+  { value: "sync", label: "Cloud sync", icon: RefreshCw, scope: "advanced" },
   { value: "operatories", label: "Operatories", scope: "advanced" },
   { value: "practitioners", label: "Practitioners", scope: "advanced" },
   { value: "treatments", label: "Treatment types", scope: "advanced" },
@@ -164,6 +166,9 @@ export function SettingsPage() {
           </TabsContent>
           <TabsContent value="account" className="mt-4">
             <AccountPanel />
+          </TabsContent>
+          <TabsContent value="sync" className="mt-4">
+            <SyncTab />
           </TabsContent>
           <TabsContent value="appearance" className="mt-4 space-y-4">
             <AppearanceTab />

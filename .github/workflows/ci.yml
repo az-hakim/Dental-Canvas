@@ -1,5 +1,13 @@
 name: CI
 
+# Cloud sync is compiled into the bundle at build time (see build-packages.yml).
+# The values are public by design — the anon key ships inside every installer —
+# so they live in repository variables, not secrets. They are empty on fork
+# pull requests, which simply produces the offline-only build.
+env:
+  VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+  VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
+
 on:
   push:
     branches: [main]

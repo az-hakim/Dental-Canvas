@@ -9,6 +9,16 @@ concurrency:
   group: packages-${{ github.ref }}
   cancel-in-progress: false
 
+# Cloud sync is compiled into the frontend at build time, so these must be set
+# for every packaging job and for verify-and-publish's reference build: one
+# missing job would produce a package whose embedded frontend no longer matches
+# the reference hash. Public values by design (the anon key ships inside each
+# installer), hence repository variables rather than secrets. Empty means an
+# offline-only build, which verify-and-publish refuses for a release tag.
+env:
+  VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+  VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
+
 jobs:
   # ── Windows NSIS installer (+ updater artifacts) ────────────────────
   build-windows:
@@ -593,6 +603,20 @@ jobs:
       - name: Pin reproducible build environment
         run: source scripts/repro-env.sh
 
+      # The embedded-frontend check compares the packages against the build
+      # below, so a missing variable would make an offline-only release agree
+      # with itself and ship silently. Refuse that here instead.
+      - name: Cloud sync credentials are configured
+        env:
+          URL: ${{ vars.VITE_SUPABASE_URL }}
+          KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
+        run: |
+          if [ -z "$URL" ] || [ -z "$KEY" ]; then
+            echo "::error::VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY repository variables are empty, so this tag would ship with cloud sync disabled. Set both under Settings → Secrets and variables → Actions → Variables, then re-run this workflow."
+            exit 1
+          fi
+          echo "cloud sync configured for $URL"
+
       # Built with the pinned environment above, so this dist/ is the reference
       # every package is checked against and its manifest is published with
       # the release for developers to compare against.
@@ -601,6 +625,19 @@ jobs:
           npm run build
           echo "Reference build entry chunk: $(grep -o 'index-[A-Za-z0-9_-]*\.js' dist/index.html | head -1)"
           node scripts/build-manifest.mjs dist --out repro-manifest.json --label "${{ runner.os }}-${{ runner.arch }}"
+
+      # Proves the values reached Vite instead of being configured but unused.
+      - name: The reference build contains the Supabase project
+        env:
+          URL: ${{ vars.VITE_SUPABASE_URL }}
+        run: |
+          host=${URL#https://}
+          host=${host%/}
+          if ! grep -rqF "$host" dist/assets; then
+            echo "::error::dist/ does not contain $host, so cloud sync was not compiled into this build."
+            exit 1
+          fi
+          echo "cloud sync compiled into dist/: $host"
 
       # The manifest published below is only useful if rebuilding this tag
       # reproduces it, so prove that here too: a second build of the same commit

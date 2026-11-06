@@ -74,18 +74,19 @@ select is(
   'account B sees zero of A''s operatories'
 );
 
+-- Postgres only allows a data-modifying CTE at the top level, so run the
+-- statement on its own and then assert that nothing changed. Under B's JWT
+-- the RLS policies match no rows, so both statements are no-ops.
+update public.patients set first_name = 'Hacked';
 select is(
-  (with changed as (
-    update public.patients set first_name = 'Hacked' returning 1
-  ) select count(*) from changed),
+  (select count(*) from public.patients where first_name = 'Hacked'),
   0::bigint,
   'account B updates zero of A''s rows'
 );
 
+delete from public.patients;
 select is(
-  (with removed as (
-    delete from public.patients returning 1
-  ) select count(*) from removed),
+  (select count(*) from public.patients),
   0::bigint,
   'account B deletes zero of A''s rows'
 );

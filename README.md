@@ -98,6 +98,14 @@ pnpm build      # desktop/browser bundle embeds the two public values
 `.env*` files are git-ignored. The anon key is public by design; Row Level
 Security is what protects patient data.
 
+Released installers are built by GitHub Actions (`.github/workflows/
+build-packages.yml`), which reads the two values from **repository variables**
+of the same name (Settings → Secrets and variables → Actions → Variables) —
+public values, so variables rather than secrets. Keep them pointed at the same
+project as your `.env.local`, or the shipped installers will talk to a
+different database than your local builds. The release job fails instead of
+publishing when they are unset, so a tag cannot ship with sync silently off.
+
 In the hosted project, set **Authentication → URL Configuration**:
 
 - Site URL: your deployed web app URL.

@@ -29,6 +29,8 @@ import {
   writeAccountMode,
   type AccountMode,
 } from "./lib/account-mode";
+import { readSyncOptions } from "./lib/sync/options";
+import { useSyncOptions } from "./hooks/use-sync-options";
 import { onDataChanged } from "./lib/data-change-signal";
 import { httpLocalSyncApi } from "./lib/sync/local-api";
 import { createSupabaseSyncAdapter } from "./lib/sync/cloud";
@@ -89,6 +91,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [recoveryMode, setRecoveryMode] = useState(false);
   const [accountError, setAccountError] = useState<string | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>(INITIAL_SYNC_STATUS);
+  const syncOptions = useSyncOptions();
 
   const engineRef = useRef<SyncEngine | null>(null);
   const engineUserIdRef = useRef<string | null>(null);
@@ -131,6 +134,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       userId: nextUser.id,
       local: httpLocalSyncApi,
       cloud: createSupabaseSyncAdapter(client, nextUser.id),
+      // Settings → Cloud sync can pause background traffic; "Sync now" and
+      // the initial sync on sign-in still run.
+      autoSync: () => readSyncOptions().autoSync,
     });
     engineRef.current = engine;
     engineUserIdRef.current = nextUser.id;
@@ -195,15 +201,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const offData = onDataChanged(() => engine()?.requestSync(1_200));
     const onOnline = () => engine()?.requestSync(0);
     window.addEventListener("online", onOnline);
-    const interval = window.setInterval(() => {
-      if (engine() && navigator.onLine !== false) engine()?.requestSync(0);
-    }, 60_000);
+    const interval = syncOptions.autoSync
+      ? window.setInterval(() => {
+          if (engine() && navigator.onLine !== false) engine()?.requestSync(0);
+        }, syncOptions.intervalMinutes * 60_000)
+      : null;
     return () => {
       offData();
       window.removeEventListener("online", onOnline);
-      window.clearInterval(interval);
+      if (interval !== null) window.clearInterval(interval);
     };
-  }, []);
+  }, [syncOptions.autoSync, syncOptions.intervalMinutes]);
 
   const signUp = useCallback(
     async (email: string, password: string, extras?: SignUpExtras): Promise<SignUpResult> => {

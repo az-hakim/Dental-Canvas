@@ -39,6 +39,8 @@ export interface SyncEngineOptions {
   local: LocalSyncApi;
   cloud: CloudSyncAdapter;
   isOnline?: () => boolean;
+  /** Background-sync switch (Settings → Cloud sync). `syncNow` ignores it. */
+  autoSync?: () => boolean;
   storage?: StorageLike | null;
   now?: () => number;
   /** Injectable for tests; production uses window.setTimeout. */
@@ -97,6 +99,7 @@ export function createSyncEngine(opts: SyncEngineOptions): SyncEngine {
   const setTimer = opts.setTimeoutFn ?? ((fn, ms) => setTimeout(fn, ms));
   const clearTimer = opts.clearTimeoutFn ?? ((h) => clearTimeout(h));
   const deviceKey = `${DEVICE_FLAG_PREFIX}${opts.userId}`;
+  const autoSync = opts.autoSync ?? (() => true);
 
   let status: SyncStatus = { phase: "idle", lastSyncAt: null, pending: 0, error: null };
   const listeners = new Set<() => void>();
@@ -331,7 +334,7 @@ export function createSyncEngine(opts: SyncEngineOptions): SyncEngine {
   }
 
   function scheduleRetry(): void {
-    if (stopped) return;
+    if (stopped || !autoSync()) return;
     const base = Math.min(60_000, 1_000 * 2 ** Math.min(retry, 6));
     retry += 1;
     const delay = base + Math.floor(Math.random() * 250);
@@ -353,7 +356,7 @@ export function createSyncEngine(opts: SyncEngineOptions): SyncEngine {
   }
 
   function requestSync(delayMs = 1_500): void {
-    if (stopped) return;
+    if (stopped || !autoSync()) return;
     if (timer) clearTimer(timer);
     timer = setTimer(() => {
       timer = null;
@@ -383,7 +386,9 @@ export function createSyncEngine(opts: SyncEngineOptions): SyncEngine {
           if (at > 0) setStatus({ lastSyncAt: at, pending: meta.pending_changes });
         })
         .catch(() => undefined);
-      unsubscribeRealtime = opts.cloud.subscribe(() => requestSync(750));
+      unsubscribeRealtime = opts.cloud.subscribe(() => {
+        if (autoSync()) requestSync(750);
+      });
       void syncNow("start");
     },
 
