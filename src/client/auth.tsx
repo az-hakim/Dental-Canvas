@@ -20,6 +20,7 @@ import {
 } from "react";
 import type { User } from "@supabase/supabase-js";
 import {
+  authRedirectUrl,
   cloudConfigured,
   friendlyAuthError,
   supabase,
@@ -217,11 +218,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (email: string, password: string, extras?: SignUpExtras): Promise<SignUpResult> => {
       setAccountError(null);
       if (!client) throw new Error("Cloud sync is not configured in this build.");
+      const redirectTo = authRedirectUrl();
       const { data, error } = await client.auth.signUp({
         email: email.trim(),
         password,
         options: {
-          emailRedirectTo: window.location.origin,
+          ...(redirectTo ? { emailRedirectTo: redirectTo } : {}),
           data: {
             doctor_name: extras?.doctor_name ?? "",
             clinic_name: extras?.clinic_name ?? "",
@@ -257,9 +259,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const resetPassword = useCallback(
     async (email: string) => {
       if (!client) throw new Error("Cloud sync is not configured in this build.");
-      const { error } = await client.auth.resetPasswordForEmail(email.trim(), {
-        redirectTo: window.location.origin,
-      });
+      const redirectTo = authRedirectUrl();
+      const { error } = await client.auth.resetPasswordForEmail(
+        email.trim(),
+        redirectTo ? { redirectTo } : undefined,
+      );
       if (error) throw new Error(friendlyAuthError(error.message));
     },
     [client],

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  authRedirectUrl,
   createCloudClient,
   friendlyAuthError,
   hasSupabaseEnv,
@@ -39,6 +40,32 @@ describe("Supabase env fallback", () => {
     );
     expect(friendlyAuthError("Email not confirmed")).toContain("confirm your email");
     expect(friendlyAuthError("User already registered")).toContain("already exists");
-    expect(friendlyAuthError("Failed to fetch")).toContain("offline");
+    expect(friendlyAuthError("Failed to fetch")).toContain("cloud server");
+    // WebKit (the desktop app) words the same failure differently.
+    expect(friendlyAuthError("Load failed")).toContain("cloud server");
+    expect(friendlyAuthError("NetworkError when attempting to fetch resource.")).toContain(
+      "cloud server",
+    );
+    // Supabase's built-in mailer throttles confirmation emails per hour.
+    expect(friendlyAuthError("email rate limit exceeded")).toContain(
+      "Too many confirmation emails",
+    );
+  });
+});
+
+describe("auth redirect target", () => {
+  it("keeps http(s) origins so links can return to the browser build", () => {
+    expect(authRedirectUrl("http://localhost:3000")).toBe("http://localhost:3000");
+    expect(authRedirectUrl("https://clinic.example.com")).toBe(
+      "https://clinic.example.com",
+    );
+  });
+
+  it("omits webview origins Supabase would reject", () => {
+    // Desktop: tauri://localhost on Linux/macOS, http://tauri.localhost on Windows.
+    expect(authRedirectUrl("tauri://localhost")).toBeUndefined();
+    expect(authRedirectUrl("http://tauri.localhost")).toBeUndefined();
+    expect(authRedirectUrl("https://tauri.localhost")).toBeUndefined();
+    expect(authRedirectUrl("")).toBeUndefined();
   });
 });

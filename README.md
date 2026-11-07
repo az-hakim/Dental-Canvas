@@ -114,11 +114,26 @@ In the hosted project, set **Authentication → URL Configuration**:
 Enable the Email provider and “Confirm email”. Password reset emails use the
 same redirect.
 
+> **Confirmation email limits:** Supabase's built-in mailer allows only a
+> handful of messages per hour per project, so a second sign-up in the same hour
+> fails with “Too many confirmation emails”. Configure
+> **Authentication → Emails → SMTP settings** with a real provider before a
+> clinic depends on self-service accounts.
+
 > **Tauri desktop note:** this build has no deep-link handler, so email
 > confirmation and password-reset links open in the default browser (the web
 > app). Confirm/reset there, then sign in in the desktop app. The signed-in
 > session itself persists in the desktop WebView's storage across restarts and
-> refreshes automatically.
+> refreshes automatically. Because the webview origin (`tauri://localhost`)
+> cannot be a redirect target, the desktop app omits the redirect and GoTrue
+> falls back to the project's Site URL.
+
+> **CSP note:** the desktop webview only reaches origins listed in
+> `connect-src` in [`src-tauri/tauri.conf.json`](src-tauri/tauri.conf.json).
+> It allows `https://*.supabase.co` and `wss://*.supabase.co`; a self-hosted
+> Supabase on a custom domain needs that domain added, otherwise every account
+> and sync request fails as a bare “Load failed” with no server contact at all.
+> `tests/tauri-csp.test.ts` guards the allow-list.
 
 ### 4. How sync works
 

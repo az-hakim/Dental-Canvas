@@ -61,6 +61,31 @@ export const supabase: SupabaseClient | null = createCloudClient(env);
 /** True only when a usable client was actually created. */
 export const cloudConfigured = supabase !== null;
 
+/**
+ * Where Supabase should send someone after clicking a confirmation or reset
+ * link.
+ *
+ * Must be an http(s) URL the project is configured to allow. Desktop builds
+ * render from the `tauri://localhost` / `http://tauri.localhost` webview
+ * origins, which Supabase rejects, so those return undefined and GoTrue falls
+ * back to the project's Site URL. The app cannot receive a deep link in this
+ * build: the visitor confirms in the browser and then signs in here (README,
+ * "Cloud sync").
+ */
+export function authRedirectUrl(origin?: string): string | undefined {
+  const value =
+    origin ?? (typeof window === "undefined" ? "" : window.location.origin);
+  if (!/^https?:\/\//i.test(value)) return undefined;
+  try {
+    // Windows/Android webviews serve the app from tauri.localhost; it is an
+    // app-internal origin that Supabase will never have in its allow-list.
+    if (new URL(value).hostname === "tauri.localhost") return undefined;
+    return value;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Non-technical auth error messages for the UI. */
 export function friendlyAuthError(message: string): string {
   const m = message.toLowerCase();
@@ -72,11 +97,24 @@ export function friendlyAuthError(message: string): string {
     return "An account with this email already exists. Try signing in instead.";
   }
   if (m.includes("password should be at least")) return "Use a password with at least 8 characters.";
+  if (m.includes("email rate limit") || m.includes("email_send_rate_limit")) {
+    // Supabase's built-in mailer allows only a few messages an hour. Nothing is
+    // wrong with the request; the account exists once the window clears.
+    return "Too many confirmation emails went out in the last hour. Wait a few minutes and try again.";
+  }
   if (m.includes("rate limit") || m.includes("too many")) {
     return "Too many attempts. Wait a minute and try again.";
   }
-  if (m.includes("network") || m.includes("fetch") || m.includes("failed to fetch")) {
-    return "You appear to be offline. Cloud sync will resume when you reconnect.";
+  // Chromium says "Failed to fetch", WebKit (the desktop app) says "Load
+  // failed" for the same blocked/failed request.
+  if (
+    m.includes("network") ||
+    m.includes("fetch") ||
+    m.includes("load failed") ||
+    m.includes("networkerror") ||
+    m.includes("connection was lost")
+  ) {
+    return "Could not reach the cloud server. Check your internet connection and try again.";
   }
   if (m.includes("invalid email")) return "Enter a valid email address.";
   if (m.includes("jwt") || m.includes("token")) return "Your session expired. Please sign in again.";

@@ -732,6 +732,12 @@ async function applyOne(
   const cloudFkColumns = new Set(Object.keys(spec.fks).map(cloudFkColumn));
   const values: Record<string, unknown> = {};
   for (const [localCol, parent] of Object.entries(spec.fks)) {
+    // An older local database can predate an optional FK column (for example
+    // invoice_items.treatment_plan_item_id, added after the table shipped).
+    // Writing it would fail the whole apply and abort the sync cycle, so skip
+    // it: the row's other columns still apply, and the link is simply unused
+    // until that database is migrated.
+    if (!localColumnNames.has(localCol)) continue;
     const cloudCol = cloudFkColumn(localCol);
     const parentSyncId = row[cloudCol] == null ? null : String(row[cloudCol]);
     let parentId: number | null = null;

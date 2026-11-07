@@ -259,6 +259,54 @@ describe("local sync migration", () => {
     ).toHaveLength(0);
   });
 
+  it("applies a row whose optional FK column the local database predates", async () => {
+    // A device installed before invoice_items.treatment_plan_item_id existed.
+    // schema.sql only creates missing tables, so the column really can be gone.
+    await sql("ALTER TABLE invoice_items DROP COLUMN treatment_plan_item_id");
+
+    const patient = await call<{ patient: { id: number } }>("POST", "/api/patients", {
+      first_name: "Legacy",
+      last_name: "Schema",
+    });
+    const invoice = await call<{ invoice: { id: number } }>("POST", "/api/invoices", {
+      patient_id: patient.patient.id,
+    });
+    const [invoiceSync] = await sql<{ sync_id: string }>(
+      "SELECT sync_id FROM invoices WHERE id = ?",
+      [invoice.invoice.id],
+    );
+
+    const syncId = "dddddddd-1111-4111-8111-dddddddddddd";
+    const applied = await call<{ applied: number; deferred: number }>("POST", "/api/sync/apply", {
+      changes: [
+        {
+          entity: "invoice_items",
+          op: "upsert",
+          row: {
+            sync_id: syncId,
+            invoice_sync_id: invoiceSync.sync_id,
+            treatment_plan_item_sync_id: null,
+            description: "Legacy line",
+            quantity: 1,
+            unit_price: 10,
+            sort_order: 0,
+            updated_at: new Date().toISOString(),
+          },
+        },
+      ],
+    });
+
+    // Before the guard this threw `no such column: treatment_plan_item_id`,
+    // which aborted every sync cycle at the same table.
+    expect(applied.applied).toBe(1);
+    expect(applied.deferred).toBe(0);
+    const [line] = await sql<{ description: string }>(
+      "SELECT description FROM invoice_items WHERE sync_id = ?",
+      [syncId],
+    );
+    expect(line.description).toBe("Legacy line");
+  });
+
   it("returns a resumable snapshot page per table", async () => {
     await call("POST", "/api/patients", { first_name: "A", last_name: "One" });
     await call("POST", "/api/patients", { first_name: "B", last_name: "Two" });
