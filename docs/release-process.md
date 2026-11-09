@@ -59,6 +59,15 @@ crate's major.minor and reinstalling; pin the minor with `~` rather than `^`,
 otherwise the next install is free to resolve a newer minor on its own and
 reintroduce the mismatch.
 
+The same script enforces a floor on `@tauri-apps/cli` itself (2.12.0). The CLI
+embeds the NSIS installer template every Windows release is built with; older
+ones killed the running app and slept 500 ms before overwriting files, so a
+still-mapped `dental-canvas.exe` made the copy fail and `/R` relaunch the old
+version — the in-app update that downloaded and never applied. 2.12.0 switched
+to the Windows Restart Manager, which shuts the app down and waits for it. The
+Windows package job runs the check before it compiles anything, so a tag cannot
+ship the broken installer again.
+
 ## Ship
 
 ```bash

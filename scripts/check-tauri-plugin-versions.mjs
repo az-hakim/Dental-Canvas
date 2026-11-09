@@ -14,8 +14,17 @@
  * from cargo, so the check needs no install, no Rust toolchain and no network —
  * it is a pure text comparison of what the two sides would actually build.
  *
- * Exits 1 on any mismatch, on a plugin package that no crate backs, and on a
- * package the JS lockfile never resolved.
+ * The CLI is checked here too, for a different reason: it embeds the NSIS
+ * installer template every Windows release is built with. Before 2.12.0 the
+ * template killed the running app and slept 500 ms before overwriting files;
+ * when the old exe was still mapped the copy failed and `/R` relaunched the
+ * previous version — an in-app update that downloads and never applies, on
+ * every machine. 2.12.0 (tauri-bundler 2.10.0) switched to the Windows Restart
+ * Manager, which shuts the app down and waits for it before copying. So a CLI
+ * below the floor must fail before a tag, not after a release ships.
+ *
+ * Exits 1 on any mismatch, on a plugin package that no crate backs, on a
+ * package the JS lockfile never resolved, and on a CLI below the floor.
  */
 
 import { readFileSync } from "node:fs";
@@ -25,6 +34,8 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PKG_SCOPE = "@tauri-apps/plugin-";
 const CRATE_PREFIX = "tauri-plugin-";
+/** First CLI whose bundler ships the Restart Manager NSIS installer. */
+const TAURI_CLI_MIN = "2.12.0";
 
 const read = (...parts) => readFileSync(path.join(root, ...parts), "utf8");
 
@@ -32,6 +43,32 @@ const read = (...parts) => readFileSync(path.join(root, ...parts), "utf8");
 function minorOf(version) {
   const m = /^(\d+)\.(\d+)/.exec(version.trim().replace(/^[~^]/, ""));
   return m ? `${m[1]}.${m[2]}` : null;
+}
+
+/** [major, minor, patch] of a version/spec, or null. */
+function partsOf(version) {
+  const m = /^(\d+)\.(\d+)\.(\d+)/.exec(String(version ?? "").trim().replace(/^[~^]/, ""));
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+}
+
+/** Negative/zero/positive like a comparator. */
+function compareVersions(a, b) {
+  const pa = partsOf(a);
+  const pb = partsOf(b);
+  if (!pa || !pb) return null;
+  for (let i = 0; i < 3; i++) {
+    if (pa[i] !== pb[i]) return pa[i] - pb[i];
+  }
+  return 0;
+}
+
+/** The CLI version pnpm actually resolved — the one CI installs and builds with. */
+function resolvedTauriCli() {
+  for (const m of read("pnpm-lock.yaml").matchAll(/'@tauri-apps\/cli@([^':()]+)'/g)) {
+    return m[1].trim();
+  }
+  const spec = JSON.parse(read("package.json")).devDependencies?.["@tauri-apps/cli"];
+  return spec ? spec.trim().replace(/^[~^]/, "") : null;
 }
 
 /** Plugin packages declared in package.json: name → spec. */
@@ -94,6 +131,8 @@ function main() {
   const declared = declaredPluginPackages();
   const jsResolved = resolvedPluginPackages();
   const crates = resolvedCrateVersions();
+  const cliVersion = resolvedTauriCli();
+  const cliComparison = compareVersions(cliVersion, TAURI_CLI_MIN);
 
   const rows = [];
   const failures = [];
@@ -156,6 +195,26 @@ function main() {
   for (const crate of unpaired) {
     const versions = [...crates.get(crate)].join(", ");
     console.log(`(desktop-only crate, no JS wrapper) ${crate} ${versions}`);
+  }
+
+  console.log(
+    cliComparison !== null && cliComparison >= 0
+      ? `tauri cli ${cliVersion} ships the Restart Manager NSIS installer (>= ${TAURI_CLI_MIN}).`
+      : `tauri cli ${cliVersion ?? "unknown"} is below ${TAURI_CLI_MIN} — its NSIS installer cannot reliably replace a running app.`,
+  );
+
+  if (cliComparison === null || cliComparison < 0) {
+    console.error(
+      `\n@tauri-apps/cli must be at least ${TAURI_CLI_MIN} (resolved: ${cliVersion ?? "unknown"}).\n` +
+        "Older CLIs bundle tauri-bundler < 2.10.0, whose NSIS installer kills the\n" +
+        "app and sleeps only 500 ms before copying files. When the old exe is still\n" +
+        "mapped the copy fails and `/R` relaunches the previous version: the in-app\n" +
+        "update downloads and never applies. 2.12.0 replaced that with the Windows\n" +
+        "Restart Manager, which waits for the app to close first.\n\n" +
+        "To fix: bump @tauri-apps/cli in package.json to >= " + TAURI_CLI_MIN + " and refresh\n" +
+        "pnpm-lock.yaml with the same pnpm version CI uses (pnpm install).",
+    );
+    process.exit(1);
   }
 
   if (failures.length > 0) {
