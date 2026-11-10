@@ -92,6 +92,71 @@ jobs:
           Select-String -Path nsis-capture/installer-1.nsi -Pattern 'CheckIfAppIsRunning|nsis_tauri_utils' |
             ForEach-Object { "{0}:{1}" -f $_.LineNumber, $_.Line.Trim() }
 
+      # The scenario the bug report describes: the app is running, the updater
+      # launches the installer, and the installer has to replace a mapped
+      # dental-canvas.exe. The old bundle template killed the app and slept
+      # 500 ms; this asserts the update finishes and the file on disk is the one
+      # that was just packaged, whatever the app was doing.
+      - name: Install, then update over a running app
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem 'src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis\*.exe' |
+            Select-Object -First 1
+          $dir = Join-Path $env:LOCALAPPDATA 'Dental Canvas'
+          if (Test-Path $dir) { Remove-Item $dir -Recurse -Force }
+
+          $first = Start-Process -FilePath $setup.FullName -ArgumentList '/S' -PassThru
+          if (-not $first.WaitForExit(300000)) {
+            $first.Kill()
+            throw 'the fresh install did not finish within 300 s'
+          }
+          "fresh install exit code: $($first.ExitCode)"
+          if ($first.ExitCode -ne 0) { throw "fresh install failed: $($first.ExitCode)" }
+
+          $exe = Join-Path $dir 'dental-canvas.exe'
+          $uninstaller = Join-Path $dir 'uninstall.exe'
+          if (-not (Test-Path $exe)) { throw "installer created no $exe" }
+          $builtExe = 'src-tauri/x86_64-pc-windows-msvc/release/dental-canvas.exe'
+          if (-not (Test-Path $builtExe)) { $builtExe = 'src-tauri/target/x86_64-pc-windows-msvc/release/dental-canvas.exe' }
+          $exeHash = (Get-FileHash $exe -Algorithm SHA256).Hash
+          $builtHash = (Get-FileHash $builtExe -Algorithm SHA256).Hash
+          "installed exe: $((Get-Item $exe).Length) bytes, FileVersion $((Get-Item $exe).VersionInfo.FileVersion)"
+          "installed exe is this build's binary: $($exeHash -eq $builtHash)"
+          if ($exeHash -ne $builtHash) { throw 'the installed exe is not the binary this job built' }
+          $uninstallerHash = (Get-FileHash $uninstaller -Algorithm SHA256).Hash
+          $keys = Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' |
+            Where-Object { (Get-ItemProperty $_.PSPath).DisplayName -like 'Dental Canvas*' }
+          "per-user uninstall key: $(if ($keys) { $keys.PSChildName } else { 'MISSING' })"
+
+          $app = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 8
+          $appWasRunning = -not $app.HasExited
+          "app process alive before the update: $appWasRunning"
+
+          # Mark a file the update has to rewrite, so "the update ran" is
+          # distinguishable from "the installer started and did nothing".
+          # uninstall.exe is not mapped by the running app; the exe is.
+          Set-Content -Path $uninstaller -Value 'clobbered before the update' -NoNewline
+
+          $sw = [Diagnostics.Stopwatch]::StartNew()
+          $update = Start-Process -FilePath $setup.FullName -ArgumentList '/S', '/UPDATE' -PassThru
+          if (-not $update.WaitForExit(240000)) {
+            $update.Kill()
+            throw 'the update installer did not finish within 240 s — the replace step is blocked'
+          }
+          $sw.Stop()
+          "update exit code: $($update.ExitCode) after $([int]$sw.Elapsed.TotalSeconds)s"
+          if ($update.ExitCode -ne 0) { throw "update installer failed: $($update.ExitCode)" }
+
+          $afterHash = (Get-FileHash $uninstaller -Algorithm SHA256).Hash
+          "update rewrote uninstall.exe: $($afterHash -eq $uninstallerHash)"
+          if ($afterHash -ne $uninstallerHash) { throw 'the update did not write its files' }
+          "app exe still this build after the update: $(((Get-FileHash $exe -Algorithm SHA256).Hash) -eq $builtHash)"
+          "app process still running after the update: $(-not $app.HasExited)"
+          if ($appWasRunning -and -not $app.HasExited) {
+            throw 'the app survived the update — Restart Manager did not shut it down'
+          }
+
       - name: Upload the installer and its script
         uses: actions/upload-artifact@v4
         with:
