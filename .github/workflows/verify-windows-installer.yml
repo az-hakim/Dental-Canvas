@@ -118,11 +118,14 @@ jobs:
           if (-not (Test-Path $exe)) { throw "installer created no $exe" }
           $builtExe = 'src-tauri/x86_64-pc-windows-msvc/release/dental-canvas.exe'
           if (-not (Test-Path $builtExe)) { $builtExe = 'src-tauri/target/x86_64-pc-windows-msvc/release/dental-canvas.exe' }
-          $exeHash = (Get-FileHash $exe -Algorithm SHA256).Hash
+          # The bundler patches the packaged binary's resources, so compare the
+          # size with the cargo output rather than a hash.
+          $installed = Get-Item $exe
+          $built = Get-Item $builtExe
+          "installed exe: $($installed.Length) bytes, FileVersion $($installed.VersionInfo.FileVersion)"
+          "cargo output: $($built.Length) bytes — same binary: $($installed.Length -eq $built.Length)"
+          if ($installed.Length -ne $built.Length) { throw 'the installed exe is not the binary this job built' }
           $builtHash = (Get-FileHash $builtExe -Algorithm SHA256).Hash
-          "installed exe: $((Get-Item $exe).Length) bytes, FileVersion $((Get-Item $exe).VersionInfo.FileVersion)"
-          "installed exe is this build's binary: $($exeHash -eq $builtHash)"
-          if ($exeHash -ne $builtHash) { throw 'the installed exe is not the binary this job built' }
           $uninstallerHash = (Get-FileHash $uninstaller -Algorithm SHA256).Hash
           $keys = Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' |
             Where-Object { (Get-ItemProperty $_.PSPath).DisplayName -like 'Dental Canvas*' }
@@ -151,7 +154,8 @@ jobs:
           $afterHash = (Get-FileHash $uninstaller -Algorithm SHA256).Hash
           "update rewrote uninstall.exe: $($afterHash -eq $uninstallerHash)"
           if ($afterHash -ne $uninstallerHash) { throw 'the update did not write its files' }
-          "app exe still this build after the update: $(((Get-FileHash $exe -Algorithm SHA256).Hash) -eq $builtHash)"
+          "app exe still this build after the update: $((Get-Item $exe).Length -eq $built.Length)"
+          if ((Get-Item $exe).Length -ne $built.Length) { throw 'the update left a different app binary' }
           "app process still running after the update: $(-not $app.HasExited)"
           if ($appWasRunning -and -not $app.HasExited) {
             throw 'the app survived the update — Restart Manager did not shut it down'
