@@ -114,3 +114,28 @@ Note: if you add Rust dependencies (`src-tauri/Cargo.toml`), don't commit Cargo.
    verify job must use `--pattern` to fetch every package artifact (a plain
    `gh release download` silently drops some assets, which would make the
    verify gate report `file not found` on a valid build).
+
+## Local Windows-installer smoke test (Linux, via Wine)
+
+A Wine prefix can install, update and uninstall the NSIS package without a
+Windows machine, but only after one shim. The bundled script's
+`Section WebView2` reads the EdgeUpdate runtime version and, finding none,
+runs `NSISdl::download` + `ExecWait` on Microsoft's bootstrapper — under Wine
+that step never returns and the installer hangs indefinitely. Registering a
+runtime version makes the section skip itself:
+
+```sh
+export WINEPREFIX=$PWD/.tmp-wine WINEARCH=win64 WINEDEBUG=-all \
+  WINEDLLOVERRIDES="mscoree,mshtml="      # also stops the mono/gecko prompt
+wineboot -i
+wine reg add 'HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}' \
+  /v pv /t REG_SZ /d 130.0.2849.0 /f
+wine ./Dental.Canvas_<version>_x64-setup.exe /S     # then /S /UPDATE
+wine "$WINEPREFIX/drive_c/users/$USER/AppData/Local/Dental Canvas/uninstall.exe" /S
+```
+
+Wine cannot settle the question this document's CLI floor exists for: the app
+itself needs WebView2 and won't start in the prefix, and Wine does not hold the
+same image-section lock Windows does, so replacing a running install can't be
+reproduced there. Use `.github/workflows/verify-windows-installer.yml` for that.
+Delete the prefix directory afterwards — it is ~1.7 GB.
