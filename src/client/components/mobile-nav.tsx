@@ -78,17 +78,22 @@ export function MobileTopBar({ onOpenSearch, navigate }: { onOpenSearch?: () => 
   const { pref: theme, cycleTheme } = useTheme();
 
   return (
-    <header className="flex h-12 shrink-0 items-center gap-2 border-b bg-sidebar px-3 text-sidebar-foreground md:hidden">
-      <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-teal-600 text-primary-foreground shadow-sm shadow-primary/25">
+    /* 40px targets and a little breathing room: the old 36px circles were a
+       coin-toss to hit with a thumb while walking a patient through. */
+    <header
+      className="flex min-h-14 shrink-0 items-center gap-1.5 border-b bg-sidebar px-3 text-sidebar-foreground md:hidden"
+      style={{ paddingTop: "env(safe-area-inset-top)" }}
+    >
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-teal-600 text-primary-foreground shadow-sm shadow-primary/25">
         <ToothGlyph className="h-4 w-4" />
       </div>
-      <span className="flex-1 truncate text-sm font-semibold tracking-tight">Dental Canvas</span>
+      <span className="min-w-0 flex-1 truncate text-sm font-semibold tracking-tight">Dental Canvas</span>
       <SyncIndicator compact onOpenSettings={() => navigate("/settings")} />
       <button
         type="button"
         onClick={cycleTheme}
         aria-label={`Theme: ${theme} — tap to change`}
-        className="flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-sidebar-accent"
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-sidebar-accent"
       >
         {theme === "system" ? <Monitor className="h-4 w-4" /> : theme === "light" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
       </button>
@@ -96,7 +101,7 @@ export function MobileTopBar({ onOpenSearch, navigate }: { onOpenSearch?: () => 
         type="button"
         onClick={() => onOpenSearch?.()}
         aria-label="Search"
-        className="flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-sidebar-accent"
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-sidebar-accent"
       >
         <Search className="h-4 w-4" />
       </button>
@@ -104,7 +109,7 @@ export function MobileTopBar({ onOpenSearch, navigate }: { onOpenSearch?: () => 
         type="button"
         onClick={openQuickRegister}
         aria-label="Register patient"
-        className="flex h-9 w-9 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/90"
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors active:bg-primary/90"
       >
         <UserPlus className="h-4 w-4" />
       </button>

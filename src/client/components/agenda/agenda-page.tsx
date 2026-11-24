@@ -62,7 +62,7 @@ export function AgendaPage() {
           <Button
             variant="outline"
             size="sm"
-            className="h-10 rounded-full border-border/60 bg-card/85 shadow-sm backdrop-blur"
+            className="h-10 flex-1 justify-center rounded-full border-border/60 bg-card/85 shadow-sm backdrop-blur sm:flex-none"
             onClick={() => setRbOpen(true)}
           >
             <UserPlus className="h-4 w-4" /> Register &amp; book

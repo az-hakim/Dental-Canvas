@@ -234,7 +234,7 @@ export function ChairsideTimer({ className }: { className?: string }) {
                 title={`${p.minutes} minute${p.minutes === 1 ? "" : "s"} — ${p.hint}`}
                 aria-pressed={minutes === p.minutes}
                 className={cn(
-                  "rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold transition-colors",
+                  "min-h-9 rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold transition-colors sm:min-h-0",
                   minutes === p.minutes
                     ? "border-primary/30 bg-primary/10 text-primary"
                     : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",

@@ -17,17 +17,22 @@ import { PaymentDialog } from "@/components/patients/billing";
 const TO_MAKE_SOURCES: ToMakeSource[] = ["reception", "patient", "system"];
 
 export function AgendaSidePanel() {
-  const [collapsed, setCollapsed] = useState(false);
+  // Phones start with the desk panel folded: open, its fixed 46% height left
+  // the day grid about two hours tall, which is the wrong trade on a phone.
+  const [collapsed, setCollapsed] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(max-width: 1023px)").matches,
+  );
 
   if (collapsed) {
     return (
       <button
         type="button"
         onClick={() => setCollapsed(false)}
-        className="flex h-full w-8 items-center justify-center border-t border-border/50 bg-card/80 text-muted-foreground backdrop-blur transition-colors hover:bg-accent lg:border-l lg:border-t-0"
+        className="flex h-11 w-full shrink-0 items-center justify-center gap-2 border-t border-border/50 bg-card/80 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground backdrop-blur transition-colors hover:bg-accent lg:h-full lg:w-8 lg:flex-col lg:border-l lg:border-t-0"
         aria-label="Expand side panel"
       >
-        <ChevronLeft className="h-4 w-4" />
+        <ChevronLeft className="h-4 w-4 rotate-90 lg:rotate-0" />
+        <span className="lg:hidden">Waiting list &amp; reminders</span>
       </button>
     );
   }

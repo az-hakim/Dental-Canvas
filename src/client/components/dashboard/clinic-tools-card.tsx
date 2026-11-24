@@ -179,7 +179,7 @@ export function ClinicToolsCard({
                   aria-checked={checked}
                   onClick={() => setChecklist((state) => toggleChecklistItem(state, item.id))}
                   className={cn(
-                    "flex w-full items-center gap-2 rounded-lg px-1.5 py-1 text-left text-[11px] font-medium transition-colors",
+                    "flex min-h-9 w-full items-center gap-2 rounded-lg px-1.5 py-1.5 text-left text-[11px] font-medium transition-colors sm:min-h-0 sm:py-1",
                     checked ? "text-muted-foreground line-through" : "text-foreground/90 hover:bg-accent/60",
                   )}
                 >

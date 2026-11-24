@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Pencil, Plus, Search, UserPlus, Users } from "lucide-react";
+import { ChevronRight, Pencil, Plus, Search, UserPlus, Users } from "lucide-react";
 import { useApp } from "@/context";
 import { api } from "@/api";
 import { Button } from "@/components/ui/button";
@@ -102,6 +102,91 @@ export function PatientsList({ navigate }: { navigate: (to: string) => void }) {
 
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-8 md:px-6">
         <Card className="animate-rise overflow-hidden">
+          {/* Phones get a card list: the table needed a sideways swipe to see
+              the phone column and the alerts, which nobody discovers on a
+              touch screen. From sm up the table is the better density. */}
+          <div className="sm:hidden">
+            {loading && visible.length === 0 ? (
+              <div className="divide-y divide-border/40">
+                {[0, 1, 2, 3].map((i) => (
+                  <div key={i} className="flex items-center gap-3 px-4 py-3.5">
+                    <div className="h-9 w-9 shrink-0 animate-pulse rounded-full bg-muted" />
+                    <div className="flex-1 space-y-1.5">
+                      <div className="h-3 w-2/3 animate-pulse rounded bg-muted" />
+                      <div className="h-2.5 w-1/3 animate-pulse rounded bg-muted" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : visible.length === 0 ? (
+              <div className="flex flex-col items-center gap-3 px-6 py-12 text-center">
+                <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/15 to-teal-500/10 text-primary">
+                  {q ? <Search className="h-6 w-6" /> : <ToothGlyph className="h-6 w-6" />}
+                </span>
+                <p className="text-sm text-muted-foreground">
+                  {q
+                    ? `No patients match “${q.trim()}”. Try a surname, phone number or email.`
+                    : "No patients yet. Register your first patient — a name is all it takes."}
+                </p>
+                {!q && (
+                  <Button
+                    size="sm"
+                    className="rounded-full"
+                    onClick={() => {
+                      setEditing(null);
+                      setDialogOpen(true);
+                    }}
+                  >
+                    <Plus className="h-4 w-4" />
+                    Register patient
+                  </Button>
+                )}
+              </div>
+            ) : (
+              <ul className="divide-y divide-border/40">
+                {visible.map((p) => {
+                  const owed = balances[p.id] ?? 0;
+                  const alertCount = p.medical_alerts
+                    ? p.medical_alerts.split(",").filter((s) => s.trim()).length
+                    : 0;
+                  return (
+                    <li key={p.id}>
+                      <button
+                        type="button"
+                        onClick={() => navigate(`/patients/${p.id}`)}
+                        className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors active:bg-primary/[0.06]"
+                      >
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[11px] font-bold text-primary">
+                          {initials(p)}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate font-medium">
+                            {p.last_name}, {p.first_name}
+                          </span>
+                          <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                            <span className="truncate">{p.phone ?? "No phone"}</span>
+                            {owed > 0 && (
+                              <span className="inline-flex shrink-0 items-center rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-semibold text-rose-800 dark:bg-rose-950 dark:text-rose-200">
+                                owes {formatMoney(owed)}
+                              </span>
+                            )}
+                            {alertCount > 0 && (
+                              <span className="inline-flex shrink-0 items-center rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-medium text-rose-800 dark:bg-rose-950 dark:text-rose-200">
+                                {alertCount} alert{alertCount === 1 ? "" : "s"}
+                              </span>
+                            )}
+                          </span>
+                        </span>
+                        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/50" aria-hidden />
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+
+          <div className="hidden sm:block">
           <Table>
             <TableHeader>
               {/* Email is the one column that can be dropped on a phone
@@ -246,6 +331,7 @@ export function PatientsList({ navigate }: { navigate: (to: string) => void }) {
               )}
             </TableBody>
           </Table>
+          </div>
         </Card>
 
         {visible.length > 0 && (

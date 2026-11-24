@@ -250,7 +250,9 @@ export function App() {
           }}
         />
       )}
-      <div className="flex h-screen min-h-0 flex-col md:flex-row overflow-hidden">
+      {/* h-dvh, not h-screen: on phones 100vh includes the browser's collapsing
+          toolbar, so the bottom nav ended up below the visible area. */}
+      <div className="flex h-dvh min-h-0 flex-col overflow-hidden md:flex-row">
         {/* Skip link: first focusable element on every page for keyboard users. */}
         <a href="#main-content" className="skip-link">Skip to main content</a>
         {!isPrintRoute && <MobileTopBar onOpenSearch={openSearch} navigate={navigate} />}

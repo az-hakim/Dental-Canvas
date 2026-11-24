@@ -161,9 +161,13 @@ export function DashboardPage({
             <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-primary/80">{today}</p>
             <h1 className="mt-1 text-[26px] font-bold tracking-tight md:text-[32px]">
               {greeting()},{" "}
-              <span className="text-primary">{doctorDisplayName(app.profile.doctor_name)}</span>{" "}
-              <span className="inline-block animate-float" aria-hidden>
-                👋
+              {/* Name and wave stay together: on a phone the wave used to be
+                  orphaned on its own line under the greeting. */}
+              <span className="inline-block whitespace-nowrap">
+                <span className="text-primary">{doctorDisplayName(app.profile.doctor_name)}</span>{" "}
+                <span className="inline-block animate-float" aria-hidden>
+                  👋
+                </span>
               </span>
             </h1>
             <p className="mt-1 max-w-xl text-sm text-muted-foreground">
@@ -451,10 +455,10 @@ function ScheduleCard({ navigate }: { navigate: (to: string) => void }) {
       <div className="mt-1 flex items-center justify-between">
         <div className="text-sm text-muted-foreground">{monthLabel}</div>
         <div className="flex items-center gap-1">
-          <Button variant="ghost" size="icon" className="h-7 w-7 rounded-full" onClick={() => shift(-1)} aria-label="Previous month">
+          <Button variant="ghost" size="icon" className="h-9 w-9 rounded-full sm:h-7 sm:w-7" onClick={() => shift(-1)} aria-label="Previous month">
             <ChevronLeft className="h-4 w-4" />
           </Button>
-          <Button variant="ghost" size="icon" className="h-7 w-7 rounded-full" onClick={() => shift(1)} aria-label="Next month">
+          <Button variant="ghost" size="icon" className="h-9 w-9 rounded-full sm:h-7 sm:w-7" onClick={() => shift(1)} aria-label="Next month">
             <ChevronRight className="h-4 w-4" />
           </Button>
         </div>

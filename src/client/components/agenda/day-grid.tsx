@@ -72,10 +72,10 @@ export function DayGrid({ date, operatories, appointments, onSlotClick, onAppoin
   }
 
   return (
-    <div className="relative mx-4 mb-4 flex-1 overflow-auto rounded-2xl border border-border/60 bg-white shadow-sm dark:bg-card md:mx-6 md:mb-6">
+    <div className="relative mx-3 mb-3 flex-1 overflow-auto rounded-2xl border border-border/60 bg-white shadow-sm dark:bg-card sm:mx-4 sm:mb-4 md:mx-6 md:mb-6">
       <div className="flex min-w-fit">
         {/* Hour gutter */}
-        <div className="sticky left-0 z-20 w-16 shrink-0 bg-white dark:bg-card">
+        <div className="sticky left-0 z-20 w-12 shrink-0 bg-white dark:bg-card sm:w-16">
           <div className="sticky top-0 z-10 border-b border-border/50 bg-white dark:bg-card" style={{ height: HEADER_H }} />
           <div className="relative" style={{ height: totalHeight }}>
             {hourLabels.map(({ hour, topPx }) => (
@@ -98,7 +98,7 @@ export function DayGrid({ date, operatories, appointments, onSlotClick, onAppoin
           return (
             <div
               key={op.id}
-              className={cn("flex w-56 shrink-0 flex-col bg-white dark:bg-card", !isFirst && "border-l border-border/50")}
+              className={cn("flex w-44 shrink-0 flex-col bg-white dark:bg-card sm:w-56", !isFirst && "border-l border-border/50")}
             >
               {/* Header */}
               <div

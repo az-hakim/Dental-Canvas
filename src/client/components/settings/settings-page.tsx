@@ -148,7 +148,7 @@ export function SettingsPage() {
               last resort on very small screens). The pill styling lives in
               styles.css (.dc-tabbar) so every trigger — including the ones
               added later — picks it up from the list alone. */}
-          <TabsList className="dc-tabbar flex h-auto w-full flex-wrap justify-start gap-1 rounded-2xl border border-border/60 bg-card/70 p-1.5 shadow-sm backdrop-blur">
+          <TabsList className="dc-tabbar flex h-auto w-full flex-nowrap justify-start gap-1 overflow-x-auto rounded-2xl border border-border/60 bg-card/70 p-1.5 shadow-sm backdrop-blur sm:flex-wrap">
             {visibleTabs.map((t, i) => (
               <Fragment key={t.value}>
                 {i > 0 && t.scope === "advanced" && visibleTabs[i - 1].scope === "basic" && (

@@ -37,7 +37,9 @@ export function DayToolbar({ date, onChange, onCreate, children }: Props) {
           </p>
         </div>
 
-        <div className="ml-auto flex flex-wrap items-center gap-2">
+        {/* Full-width on phones so the two action buttons can share one row
+            instead of stacking into a third line of chrome. */}
+        <div className="ml-auto flex w-full flex-wrap items-center gap-2 sm:w-auto">
           {/* Prev | Today | Next pill */}
           {/* 36px tap targets on phones, back to the compact pill from sm up. */}
           <div className="inline-flex items-center gap-0.5 rounded-full border border-border/60 bg-card/85 p-1 shadow-sm backdrop-blur">
@@ -77,14 +79,14 @@ export function DayToolbar({ date, onChange, onCreate, children }: Props) {
             value={date}
             onChange={(e) => onChange(e.target.value)}
             aria-label="Pick a day"
-            className="h-10 rounded-full border border-border/60 bg-card/85 px-4 text-sm font-medium shadow-sm outline-none backdrop-blur focus:ring-2 focus:ring-primary/40 focus:ring-offset-2 focus:ring-offset-background"
+            className="h-10 min-w-0 flex-1 rounded-full border border-border/60 bg-card/85 px-4 text-sm font-medium shadow-sm outline-none backdrop-blur focus:ring-2 focus:ring-primary/40 focus:ring-offset-2 focus:ring-offset-background sm:flex-none"
           />
 
           <div className="mx-1 hidden h-6 w-px bg-border/70 sm:block" />
 
           {children}
 
-          <Button onClick={onCreate} className="h-10 rounded-full px-4 shadow-lg shadow-primary/20">
+          <Button onClick={onCreate} className="h-10 flex-1 justify-center rounded-full px-4 shadow-lg shadow-primary/20 sm:flex-none">
             <Plus className="h-4 w-4" /> Add appointment
           </Button>
         </div>

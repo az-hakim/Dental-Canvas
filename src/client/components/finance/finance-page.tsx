@@ -222,7 +222,7 @@ function FinanceContent({ tab, navigate }: { tab: "billing" | "revenue" | "appoi
           </div>
         </div>
         <p className="text-xs text-muted-foreground">{subtitle}</p>
-        <div className="mt-2 flex gap-1">
+        <div className="mt-2 flex gap-1 overflow-x-auto">
           <SubTab label="Billing Record" active={tab === "billing"} onClick={() => navigate("/finance/billing-record")} />
           <SubTab label="Revenue Breakdown" active={tab === "revenue"} onClick={() => navigate("/finance/revenue-breakdown")} />
           <SubTab label="Appointment Overview" active={tab === "appointments"} onClick={() => navigate("/finance/appointment-overview")} />
@@ -571,7 +571,7 @@ function SubTab({ label, active, onClick }: { label: string; active: boolean; on
       type="button"
       onClick={onClick}
       className={cn(
-        "rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+        "shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
         active ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground",
       )}
     >

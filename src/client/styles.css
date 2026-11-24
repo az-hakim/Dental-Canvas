@@ -484,6 +484,18 @@ html.a11y-contrast .dc-page .dc-paper {
    primary pill instead of a raised white chip, so the navigation reads as one
    surface with the page. Declared here rather than per-trigger so new tabs
    inherit it automatically. */
+/* On a phone the tab strips scroll sideways instead of wrapping into three
+   or four rows (Settings wrapped to four, pushing its first card off screen).
+   Hide the scrollbar: the partially visible tab is the affordance. */
+.dc-tabbar {
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+}
+.dc-tabbar::-webkit-scrollbar {
+  display: none;
+}
+
 .dc-tabbar > button[role="tab"] {
   border-radius: 0.75rem;
   transition: background-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;

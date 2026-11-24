@@ -129,19 +129,23 @@ export function PatientPage({ id, navigate }: Props) {
               )}
             </div>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setEditing(true)}
-            className="h-9 rounded-full border-border/60 bg-card/85 shadow-sm backdrop-blur"
-          >
-            <Pencil className="h-4 w-4" />
-            Edit
-          </Button>
-          <Button variant="ghost" size="sm" onClick={deletePatient} className="h-9 rounded-full text-destructive hover:bg-destructive/10 hover:text-destructive">
-            <Trash2 className="h-4 w-4" />
-            Delete
-          </Button>
+          {/* Phones: the actions take their own row below the name. In the
+              heading row they squeezed "Ada Tester" into a 90px column. */}
+          <div className="flex w-full items-center gap-2 sm:ml-auto sm:w-auto">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setEditing(true)}
+              className="h-10 flex-1 rounded-full border-border/60 bg-card/85 shadow-sm backdrop-blur sm:h-9 sm:flex-none"
+            >
+              <Pencil className="h-4 w-4" />
+              Edit
+            </Button>
+            <Button variant="ghost" size="sm" onClick={deletePatient} className="h-10 flex-1 rounded-full text-destructive hover:bg-destructive/10 hover:text-destructive sm:h-9 sm:flex-none">
+              <Trash2 className="h-4 w-4" />
+              Delete
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -159,7 +163,8 @@ export function PatientPage({ id, navigate }: Props) {
           </div>
         )}
         <Tabs defaultValue="overview">
-          <TabsList className="dc-tabbar flex h-auto w-full flex-wrap justify-start gap-1 rounded-2xl border border-border/60 bg-card/70 p-1.5 shadow-sm backdrop-blur">
+          {/* One scrolling row on a phone; wraps from sm up. */}
+          <TabsList className="dc-tabbar flex h-auto w-full flex-nowrap justify-start gap-1 overflow-x-auto rounded-2xl border border-border/60 bg-card/70 p-1.5 shadow-sm backdrop-blur sm:flex-wrap">
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="prescriptions">Prescriptions</TabsTrigger>
             <TabsTrigger value="imaging">Imaging</TabsTrigger>

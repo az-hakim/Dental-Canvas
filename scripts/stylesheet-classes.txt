@@ -6,8 +6,8 @@
 # @source roots in src/client/styles.css (they must stay src/ and
 # index.html) and look for stray files inside src/.
 #
-# source: main @ 42e3391 (2026-11-11)
-# classes: 1624
+# source: main @ d7d67e1 (2026-11-24)
+# classes: 1649
 -bottom-10
 -bottom-6
 -bottom-9
@@ -38,6 +38,8 @@ accent-[var(--primary)]
 accent-primary
 accent-white
 active:bg-muted
+active:bg-primary/90
+active:bg-primary/[0.06]
 active:scale-95
 agenda-stripes
 align-middle
@@ -343,7 +345,6 @@ border-violet-900
 border-white/10
 bottom-1
 bottom-24
-bottom-4
 bottom-full
 break-words
 capitalize
@@ -802,6 +803,7 @@ disabled:opacity-40
 disabled:opacity-50
 disabled:opacity-60
 disabled:pointer-events-none
+divide-border/40
 divide-y
 drop-shadow-sm
 duration-200
@@ -822,6 +824,7 @@ flex-1
 flex-[2]
 flex-col
 flex-col-reverse
+flex-nowrap
 flex-row
 flex-wrap
 focus-visible:opacity-100
@@ -913,6 +916,7 @@ h-[7px]
 h-[95vh]
 h-[var(--radix-select-trigger-height)]
 h-auto
+h-dvh
 h-full
 h-px
 h-screen
@@ -1005,6 +1009,7 @@ lg:border-t-0
 lg:col-span-2
 lg:col-span-3
 lg:flex
+lg:flex-col
 lg:flex-row
 lg:grid-cols-2
 lg:grid-cols-3
@@ -1013,6 +1018,9 @@ lg:grid-cols-5
 lg:grid-cols-[minmax(0,1fr)_400px]
 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.08fr)]
 lg:h-full
+lg:hidden
+lg:rotate-0
+lg:w-8
 lg:w-80
 line-clamp-2
 line-through
@@ -1029,6 +1037,7 @@ max-h-[600px]
 max-h-[80vh]
 max-h-[90vh]
 max-h-[92vh]
+max-h-[calc(100dvh-2rem)]
 max-h-[calc(100vh-2rem)]
 max-h-full
 max-h-none
@@ -1062,6 +1071,8 @@ md:text-[30px]
 md:text-[32px]
 md:text-sm
 min-h-0
+min-h-14
+min-h-9
 min-h-[4.5rem]
 min-h-[80px]
 min-h-full
@@ -1090,7 +1101,6 @@ mt-6
 mx-1
 mx-2
 mx-3
-mx-4
 mx-auto
 my-1
 object-contain
@@ -1117,6 +1127,7 @@ overflow-hidden
 overflow-x-auto
 overflow-x-hidden
 overflow-y-auto
+overscroll-contain
 p-0
 p-0.5
 p-1
@@ -1177,6 +1188,7 @@ py-14
 py-2
 py-2.5
 py-3
+py-3.5
 py-4
 py-5
 py-6
@@ -1290,6 +1302,7 @@ ring-violet-600
 ring-violet-700
 ring-violet-800
 ring-violet-900
+rotate-90
 rounded
 rounded-2xl
 rounded-[3px]
@@ -1325,6 +1338,7 @@ sm:col-span-2
 sm:col-span-3
 sm:flex-none
 sm:flex-row
+sm:flex-wrap
 sm:gap-2
 sm:grid-cols-2
 sm:grid-cols-3
@@ -1337,6 +1351,8 @@ sm:grid-cols-[2fr_0.6fr_1fr_auto]
 sm:grid-cols-[2fr_1fr_1fr_1fr_1.5fr_auto]
 sm:grid-cols-[2fr_1fr_1fr_auto]
 sm:grid-cols-[2fr_1fr_auto]
+sm:h-7
+sm:h-9
 sm:hidden
 sm:inline
 sm:inline-flex
@@ -1354,7 +1370,11 @@ sm:max-w-none
 sm:max-w-sm
 sm:max-w-xl
 sm:mb-0
+sm:mb-4
+sm:min-h-0
+sm:ml-auto
 sm:mx-0
+sm:mx-4
 sm:p-1.5
 sm:p-6
 sm:px-0
@@ -1368,8 +1388,12 @@ sm:static
 sm:table-cell
 sm:text-[60px]
 sm:text-left
+sm:w-16
+sm:w-56
+sm:w-7
 sm:w-80
 sm:w-auto
+sm:w-full
 space-y-0
 space-y-0.5
 space-y-1
@@ -1608,6 +1632,7 @@ w-[21rem]
 w-[70px]
 w-[7px]
 w-[88px]
+w-[calc(100%-1.5rem)]
 w-[min(90vw,520px)]
 w-[min(92vw,380px)]
 w-[min(92vw,560px)]
