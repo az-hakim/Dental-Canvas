@@ -100,23 +100,43 @@ async function ensureColumn(table: string, column: string, ddl: string): Promise
 }
 
 /**
- * Columns of every table in one query, keyed by unprefixed table name. Asking
- * per table costs one round trip each; a hosted database pays network latency
- * for all of them on a clinic's first request.
+ * Columns of every table, keyed by unprefixed table name. Asking per table
+ * costs one round trip each; a hosted database pays network latency for all of
+ * them on a clinic's first request.
+ *
+ * The single-query form uses the `pragma_table_info()` table-valued function,
+ * which Cloudflare D1 refuses (`SQLITE_AUTH: not authorized`). D1 is the runtime
+ * for the tests and the bundled desktop worker, so the slow per-table PRAGMA is
+ * the fallback there instead of failing every sync request.
  */
 async function columnsByTable(): Promise<Map<string, Set<string>>> {
-  const rows = await query<{ tbl: string; col: string }>(
-    `SELECT m.name AS tbl, p.name AS col
-       FROM sqlite_master m JOIN pragma_table_info(m.name) p
-      WHERE m.type = 'table' AND m.name NOT LIKE 'sqlite_%'`,
-  );
   const prefix = prefixForKey(currentTenantKey());
   const byTable = new Map<string, Set<string>>();
-  for (const row of rows) {
-    const table = stripPrefix(row.tbl, prefix);
-    let columns = byTable.get(table);
-    if (!columns) byTable.set(table, (columns = new Set()));
-    columns.add(row.col);
+  try {
+    const rows = await query<{ tbl: string; col: string }>(
+      `SELECT m.name AS tbl, p.name AS col
+         FROM sqlite_master m JOIN pragma_table_info(m.name) p
+        WHERE m.type = 'table' AND m.name NOT LIKE 'sqlite_%' AND m.name NOT LIKE '\\_cf\\_%' ESCAPE '\\'`,
+    );
+    for (const row of rows) {
+      const table = stripPrefix(row.tbl, prefix);
+      let columns = byTable.get(table);
+      if (!columns) byTable.set(table, (columns = new Set()));
+      columns.add(row.col);
+    }
+    return byTable;
+  } catch {
+    byTable.clear();
+  }
+
+  // `_cf_KV` is Cloudflare's own bookkeeping table and PRAGMA on it is denied
+  // by D1's authorizer (`SQLITE_AUTH`), so it must never be probed.
+  const tables = await query<{ name: string }>(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\'",
+  );
+  for (const { name } of tables) {
+    const columns = new Set((await columnsOf(name)).map((column) => column.name));
+    byTable.set(stripPrefix(name, prefix), columns);
   }
   return byTable;
 }
@@ -140,11 +160,20 @@ async function backfillSyncIds(spec: SyncTableSpec): Promise<void> {
 /** Tables holding at least one row that has no sync identity yet. */
 async function tablesWithMissingSyncIds(tableNames: string[]): Promise<Set<string>> {
   if (tableNames.length === 0) return new Set();
-  const probe = tableNames
-    .map((name) => `SELECT '${name}' AS tbl FROM "${name}" WHERE sync_id IS NULL LIMIT 1`)
-    .join(" UNION ALL ");
-  const rows = await query<{ tbl: string }>(probe);
-  return new Set(rows.map((row) => row.tbl));
+  // `EXISTS`, not `… LIMIT 1`: a LIMIT inside a UNION ALL arm is a syntax
+  // error in SQLite (`LIMIT clause should come after UNION ALL not before`).
+  const missing = new Set<string>();
+  // SQLite caps a compound SELECT at five terms in D1 (`too many terms in
+  // compound SELECT`), and a clinic has more sync tables than that.
+  for (let i = 0; i < tableNames.length; i += 5) {
+    const probe = tableNames
+      .slice(i, i + 5)
+      .map((name) => `SELECT '${name}' AS tbl WHERE EXISTS (SELECT 1 FROM "${name}" WHERE sync_id IS NULL)`)
+      .join(" UNION ALL ");
+    const rows = await query<{ tbl: string }>(probe);
+    for (const row of rows) missing.add(row.tbl);
+  }
+  return missing;
 }
 
 function createSyncTriggers(spec: SyncTableSpec): SqlStatement[] {
