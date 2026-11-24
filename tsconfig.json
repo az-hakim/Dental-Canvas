@@ -17,6 +17,6 @@
     },
     "types": ["@cloudflare/workers-types", "node", "vitest/globals"]
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "api/**/*.ts", "tests/**/*.ts", "vitest.config.ts"],
+  "include": ["src/**/*.ts", "src/**/*.tsx", "tests/**/*.ts", "vitest.config.ts"],
   "exclude": ["node_modules", "dist"]
 }

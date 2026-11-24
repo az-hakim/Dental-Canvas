@@ -3,9 +3,8 @@
   "buildCommand": "npm run vercel-build",
   "outputDirectory": "dist",
   "functions": {
-    "api/[...path].ts": {
-      "maxDuration": 60,
-      "memory": 1024
+    "api/[...path].mjs": {
+      "maxDuration": 60
     }
   },
   "rewrites": [

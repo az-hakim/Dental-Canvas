@@ -15,7 +15,7 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import { createClient, type Client } from "@libsql/client";
+import { createClient } from "@libsql/client";
 import { setSqlDriverResolver, setTenantKeyResolver, type SqlDriver } from "../db";
 import { setPublicTokenRegistrar, type PublicTokenKind } from "./token-registry";
 import { rewriteSchema, rewriteSql, tenantPrefix } from "./sql-prefix";
@@ -51,6 +51,9 @@ export function readRuntimeConfig(): RuntimeConfig {
     databaseToken: "",
   };
 }
+
+// Type-only: named type exports differ between @libsql/client versions.
+type Client = ReturnType<typeof createClient>;
 
 let client: Client | null = null;
 

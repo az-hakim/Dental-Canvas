@@ -5338,7 +5338,7 @@ app.get("/api/health", (c) => c.json({ ok: true }));
 // Deployment discovery: the web client reads this at boot to decide whether it
 // may show practice data or must show the sign-in gate first. Deliberately
 // public — it carries no practice data and its keys are already in the bundle.
-app.get("/api/config", (c) => c.json(publicConfig()));
+app.get("/api/config", (c: Context) => c.json(publicConfig()));
 
 // ── Online booking (public self-scheduling) ─────────────────
 //

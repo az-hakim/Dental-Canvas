@@ -132,6 +132,9 @@ importers:
       concurrently:
         specifier: ^9.0.0
         version: 9.2.1
+      esbuild:
+        specifier: ^0.25.12
+        version: 0.25.12
       miniflare:
         specifier: 4.20260426.0
         version: 4.20260426.0
