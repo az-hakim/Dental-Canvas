@@ -3,10 +3,24 @@
   "buildCommand": "npm run vercel-build",
   "outputDirectory": "dist",
   "functions": {
-    "api/[...path].mjs": {
-      "maxDuration": 60
+    "api/index.mjs": {
+      "maxDuration": 60,
+      "regions": ["bom1"]
     }
   },
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/index",
+      "transforms": [
+        {
+          "type": "request.path",
+          "op": "set",
+          "args": "/api/$1"
+        }
+      ]
+    }
+  ],
   "rewrites": [
     {
       "source": "/((?!api/|assets/|sw\\.js|sql-wasm\\.wasm|manifest\\.json|icon\\.svg|.*\\.[a-zA-Z0-9]+$).*)",

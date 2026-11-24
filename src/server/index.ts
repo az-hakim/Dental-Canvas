@@ -1,7 +1,15 @@
 import { type Context } from "hono";
 import { z } from "zod";
 import { createApp } from "@clawnify/app";
-import { currentTenantKey, query, get, run } from "./db";
+import {
+  currentTenantKey,
+  query,
+  get,
+  run,
+  runBatch,
+  withBatchedWrites,
+  type SqlStatement,
+} from "./db";
 import { registerPublicToken } from "./tenant/token-registry";
 import { publicConfig } from "./tenant/config";
 import {
@@ -108,6 +116,12 @@ async function isEmpty(table: SeedTable): Promise<boolean> {
 }
 
 async function seedOnce(): Promise<void> {
+  // Every starter row is collected first and written in one round trip: a
+  // hosted database charges full network latency per statement, and a clinic's
+  // first request would otherwise spend most of its time in this function.
+  const statements: SqlStatement[] = [];
+  const add = (sql: string, params: unknown[] = []) => statements.push({ sql, params });
+
   for (const [key, value] of Object.entries({
     ...DEFAULT_SETTINGS,
     ...DEFAULT_PROFILE_SETTINGS,
@@ -115,26 +129,26 @@ async function seedOnce(): Promise<void> {
     ...DEFAULT_INVENTORY_SETTINGS,
     ...DEFAULT_STORAGE_SETTINGS,
   })) {
-    await run("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", [key, value]);
+    add("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", [key, value]);
   }
 
   // Sample rows land only while the table is still empty, so a redeploy never
   // resurrects an operatory, practitioner or treatment type the user deleted.
   if (await isEmpty("operatories")) {
     for (const o of SEED_OPERATORIES) {
-      await run("INSERT INTO operatories (name, color, sort_order) VALUES (?, ?, ?)", [o.name, o.color, o.sort_order]);
+      add("INSERT INTO operatories (name, color, sort_order) VALUES (?, ?, ?)", [o.name, o.color, o.sort_order]);
     }
   }
 
   if (await isEmpty("practitioners")) {
     for (const p of SEED_PRACTITIONERS) {
-      await run("INSERT INTO practitioners (name, role, color) VALUES (?, ?, ?)", [p.name, p.role, p.color]);
+      add("INSERT INTO practitioners (name, role, color) VALUES (?, ?, ?)", [p.name, p.role, p.color]);
     }
   }
 
   if (await isEmpty("treatment_types")) {
     for (const t of SEED_TREATMENT_TYPES) {
-      await run(
+      add(
         "INSERT INTO treatment_types (code, name, duration_minutes, default_fee, color) VALUES (?, ?, ?, ?, ?)",
         [t.code, t.name, t.duration_minutes, t.default_fee, t.color],
       );
@@ -143,13 +157,13 @@ async function seedOnce(): Promise<void> {
 
   if (await isEmpty("dentist_notes")) {
     for (const n of SEED_DENTIST_NOTES) {
-      await run("INSERT INTO dentist_notes (body) VALUES (?)", [n.body]);
+      add("INSERT INTO dentist_notes (body) VALUES (?)", [n.body]);
     }
   }
 
   if (await isEmpty("medicines")) {
     for (const m of SEED_MEDICINES) {
-      await run(
+      add(
         "INSERT INTO medicines (name, drug_group, dosage, frequency, duration, instructions) VALUES (?, ?, ?, ?, ?, ?)",
         [m.name, m.drug_group, m.dosage, m.frequency, m.duration, m.instructions],
       );
@@ -162,12 +176,12 @@ async function seedOnce(): Promise<void> {
     const cur = await get<{ value: string }>("SELECT value FROM settings WHERE key = 'medicines_presets_version'");
     if ((cur?.value ?? "") !== MEDICINES_PRESETS_VERSION) {
       for (const m of SEED_MEDICINES) {
-        await run(
+        add(
           "INSERT OR IGNORE INTO medicines (name, drug_group, dosage, frequency, duration, instructions) VALUES (?, ?, ?, ?, ?, ?)",
           [m.name, m.drug_group, m.dosage, m.frequency, m.duration, m.instructions],
         );
       }
-      await run("INSERT OR REPLACE INTO settings (key, value) VALUES ('medicines_presets_version', ?)", [
+      add("INSERT OR REPLACE INTO settings (key, value) VALUES ('medicines_presets_version', ?)", [
         MEDICINES_PRESETS_VERSION,
       ]);
     }
@@ -177,7 +191,7 @@ async function seedOnce(): Promise<void> {
   // first-run date so the expiring/expired alerts surface right away.
   if (await isEmpty("inventory_items")) {
     for (const it of SEED_INVENTORY) {
-      await run(
+      add(
         `INSERT INTO inventory_items
            (name, category, sku, unit, current_stock, min_threshold, reorder_quantity,
             supplier_name, supplier_contact, batch_number, expiry_date, location, unit_cost, notes)
@@ -190,6 +204,8 @@ async function seedOnce(): Promise<void> {
       );
     }
   }
+
+  await runBatch(statements);
 }
 
 async function ensureSeeded(): Promise<void> {
@@ -576,11 +592,16 @@ async function ensureMigrated(): Promise<void> {
 }
 
 app.use("*", async (_c, next) => {
-  await ensureMigrated();
-  // Sync bookkeeping must exist before the first seed INSERT so those rows get
-  // their sync ids and land in the outbox like every later write.
-  await ensureSyncReady().catch(() => undefined);
-  await ensureSeeded();
+  // First-run bookkeeping, with writes queued: on a hosted database each
+  // statement otherwise costs a full network round trip, which made a clinic's
+  // first request (and every new server instance) take tens of seconds.
+  await withBatchedWrites(async () => {
+    await ensureMigrated();
+    // Sync bookkeeping must exist before the first seed INSERT so those rows get
+    // their sync ids and land in the outbox like every later write.
+    await ensureSyncReady().catch(() => undefined);
+    await ensureSeeded();
+  });
   await next();
 });
 

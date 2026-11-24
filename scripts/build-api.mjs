@@ -10,6 +10,13 @@
  * Bundling fixes the resolution at build time. Only packages stay external:
  * they are installed on Vercel from the lockfile, and the SQLite/WASM assets in
  * `sql.js` must stay real files.
+ *
+ * The output is `api/index.mjs`, a single plain function. A bracketed catch-all
+ * (`api/[...path].mjs`) is not a real route on Vercel for non-Next projects: it
+ * matched `/api/patients` but every deeper path — `/api/patients/1`,
+ * `/api/dashboard/summary` — 404'd at the edge before reaching the function.
+ * `vercel.json` sends all of `/api/*` here instead and restores the original
+ * path with a `request.path` transform.
  */
 import { build } from "esbuild";
 import { mkdirSync } from "node:fs";
@@ -18,7 +25,7 @@ mkdirSync("api", { recursive: true });
 
 await build({
   entryPoints: ["src/server/vercel-entry.ts"],
-  outfile: "api/[...path].mjs",
+  outfile: "api/index.mjs",
   bundle: true,
   platform: "node",
   format: "esm",

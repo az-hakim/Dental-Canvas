@@ -232,7 +232,7 @@ npm run web:dev      # builds, then serves dist/ + /api on http://localhost:3000
 ```
 
 `vercel.json` builds `dist/` and routes every `/api/*` call to the
-`api/[...path].ts` function (Node runtime). Set these in
+`api/index.mjs` function (Node runtime). Set these in
 **Vercel → Settings → Environment Variables**:
 
 | Variable | Purpose |

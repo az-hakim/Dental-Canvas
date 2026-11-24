@@ -6,19 +6,29 @@
  * application handles the request exactly as it does on Cloudflare Workers and
  * in the desktop/offline backend.
  *
- * `scripts/build-api.mjs` bundles this file into `api/[...path].mjs` during the
+ * `scripts/build-api.mjs` bundles this file into `api/index.mjs` during the
  * Vercel build: Vercel transpiles an `api/` function in place without bundling,
  * so a plain TypeScript entry would ship extensionless ESM imports of
- * `src/server/*` that Node cannot resolve at runtime.
+ * `src/server/*` that Node cannot resolve at runtime. `vercel.json` routes every
+ * `/api/*` path to this function and restores the original path for Hono.
  */
 import { Hono } from "hono";
 import { getRequestListener } from "@hono/node-server";
 import app from "./index";
 import { tenantMiddleware } from "./tenant/middleware";
-import { installTenantRuntime } from "./tenant/runtime";
+import { installTenantRuntime, readRuntimeConfig } from "./tenant/runtime";
 import { createD1Facade } from "./tenant/d1-facade";
 
 installTenantRuntime();
+
+// One line per cold start: which database this deployment talks to, and whether
+// a credential came with it. A missing token otherwise surfaces as an opaque 401
+// from the database on every authenticated request.
+const dbConfig = readRuntimeConfig();
+console.log(
+  `[api] database ${dbConfig.databaseUrl} (auth token ${dbConfig.databaseToken ? "set" : "missing"})`,
+);
+
 
 const outer = new Hono();
 

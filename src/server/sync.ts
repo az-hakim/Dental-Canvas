@@ -19,7 +19,7 @@
  * existing hard-delete behaviour is preserved; `sync_tombstones` stops a stale
  * remote update from resurrecting a row the doctor deleted on this device.
  */
-import { currentTenantKey, get, query, run } from "./db";
+import { currentTenantKey, get, query, run, runBatch, type SqlStatement } from "./db";
 import { prefixForKey, stripPrefix } from "./tenant/sql-prefix";
 import {
   SEED_DENTIST_NOTES,
@@ -99,6 +99,28 @@ async function ensureColumn(table: string, column: string, ddl: string): Promise
   await run(`ALTER TABLE "${table}" ADD COLUMN ${column} ${ddl}`);
 }
 
+/**
+ * Columns of every table in one query, keyed by unprefixed table name. Asking
+ * per table costs one round trip each; a hosted database pays network latency
+ * for all of them on a clinic's first request.
+ */
+async function columnsByTable(): Promise<Map<string, Set<string>>> {
+  const rows = await query<{ tbl: string; col: string }>(
+    `SELECT m.name AS tbl, p.name AS col
+       FROM sqlite_master m JOIN pragma_table_info(m.name) p
+      WHERE m.type = 'table' AND m.name NOT LIKE 'sqlite_%'`,
+  );
+  const prefix = prefixForKey(currentTenantKey());
+  const byTable = new Map<string, Set<string>>();
+  for (const row of rows) {
+    const table = stripPrefix(row.tbl, prefix);
+    let columns = byTable.get(table);
+    if (!columns) byTable.set(table, (columns = new Set()));
+    columns.add(row.col);
+  }
+  return byTable;
+}
+
 async function backfillSyncIds(spec: SyncTableSpec): Promise<void> {
   // Chunked so a long-standing practice database never materializes every row.
   for (;;) {
@@ -115,15 +137,25 @@ async function backfillSyncIds(spec: SyncTableSpec): Promise<void> {
   }
 }
 
-async function createSyncTriggers(spec: SyncTableSpec): Promise<void> {
+/** Tables holding at least one row that has no sync identity yet. */
+async function tablesWithMissingSyncIds(tableNames: string[]): Promise<Set<string>> {
+  if (tableNames.length === 0) return new Set();
+  const probe = tableNames
+    .map((name) => `SELECT '${name}' AS tbl FROM "${name}" WHERE sync_id IS NULL LIMIT 1`)
+    .join(" UNION ALL ");
+  const rows = await query<{ tbl: string }>(probe);
+  return new Set(rows.map((row) => row.tbl));
+}
+
+function createSyncTriggers(spec: SyncTableSpec): SqlStatement[] {
   const t = spec.name;
   const pk = spec.pk;
   // Dropped and recreated so a future trigger change lands on existing installs.
-  await run(`DROP TRIGGER IF EXISTS "${t}_sync_ai"`);
-  await run(`DROP TRIGGER IF EXISTS "${t}_sync_au"`);
-  await run(`DROP TRIGGER IF EXISTS "${t}_sync_ad"`);
-
-  await run(`CREATE TRIGGER "${t}_sync_ai" AFTER INSERT ON "${t}" BEGIN
+  return [
+    { sql: `DROP TRIGGER IF EXISTS "${t}_sync_ai"` },
+    { sql: `DROP TRIGGER IF EXISTS "${t}_sync_au"` },
+    { sql: `DROP TRIGGER IF EXISTS "${t}_sync_ad"` },
+    { sql: `CREATE TRIGGER "${t}_sync_ai" AFTER INSERT ON "${t}" BEGIN
     UPDATE "${t}" SET
       sync_id = COALESCE(sync_id, ${UUID_SQL}),
       updated_at = CASE
@@ -136,21 +168,21 @@ async function createSyncTriggers(spec: SyncTableSpec): Promise<void> {
     SELECT '${t}', CAST(NEW."${pk}" AS TEXT), 'upsert',
            (SELECT sync_id FROM "${t}" WHERE "${pk}" = NEW."${pk}"), ${NOW_SQL}
     WHERE (SELECT applying FROM sync_state WHERE id = 1) = 0;
-  END`);
+  END` },
 
-  await run(`CREATE TRIGGER "${t}_sync_au" AFTER UPDATE ON "${t}"
+    { sql: `CREATE TRIGGER "${t}_sync_au" AFTER UPDATE ON "${t}"
     WHEN (SELECT applying FROM sync_state WHERE id = 1) = 0 AND OLD.sync_id IS NOT NULL
     BEGIN
       INSERT INTO sync_outbox (entity, row_ref, op, sync_id, base_updated_at, created_at)
       VALUES ('${t}', CAST(NEW."${pk}" AS TEXT), 'upsert', NEW.sync_id, OLD.updated_at, ${NOW_SQL});
-    END`);
-
-  await run(`CREATE TRIGGER "${t}_sync_ad" AFTER DELETE ON "${t}"
+    END` },
+    { sql: `CREATE TRIGGER "${t}_sync_ad" AFTER DELETE ON "${t}"
     WHEN (SELECT applying FROM sync_state WHERE id = 1) = 0 AND OLD.sync_id IS NOT NULL
     BEGIN
       INSERT INTO sync_outbox (entity, row_ref, op, sync_id, base_updated_at, created_at)
       VALUES ('${t}', CAST(OLD."${pk}" AS TEXT), 'delete', OLD.sync_id, OLD.updated_at, ${NOW_SQL});
-    END`);
+    END` },
+  ];
 }
 
 /**
@@ -162,17 +194,19 @@ export async function ensureSyncSchema(): Promise<void> {
   const tables = await tableNames();
   if (!tables.has("patients")) return; // DDL not applied yet — retry next request
 
-  await run(`CREATE TABLE IF NOT EXISTS sync_state (
+  // Bookkeeping tables in one round trip.
+  await runBatch([
+    { sql: `CREATE TABLE IF NOT EXISTS sync_state (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     applying INTEGER NOT NULL DEFAULT 0,
     owner_user_id TEXT,
     last_pull_at TEXT,
     last_push_at TEXT
-  )`);
-  await run("INSERT OR IGNORE INTO sync_state (id, applying) VALUES (1, 0)");
-  // A crash during an apply must never leave the triggers muted forever.
-  await run("UPDATE sync_state SET applying = 0 WHERE id = 1");
-  await run(`CREATE TABLE IF NOT EXISTS sync_outbox (
+  )` },
+    { sql: "INSERT OR IGNORE INTO sync_state (id, applying) VALUES (1, 0)" },
+    // A crash during an apply must never leave the triggers muted forever.
+    { sql: "UPDATE sync_state SET applying = 0 WHERE id = 1" },
+    { sql: `CREATE TABLE IF NOT EXISTS sync_outbox (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     entity TEXT NOT NULL,
     row_ref TEXT NOT NULL,
@@ -180,23 +214,20 @@ export async function ensureSyncSchema(): Promise<void> {
     sync_id TEXT,
     base_updated_at TEXT,
     created_at TEXT NOT NULL
-  )`);
-  await run("CREATE INDEX IF NOT EXISTS idx_sync_outbox_row ON sync_outbox(entity, row_ref)");
-
-  await run(`CREATE TABLE IF NOT EXISTS sync_tombstones (
+  )` },
+    { sql: "CREATE INDEX IF NOT EXISTS idx_sync_outbox_row ON sync_outbox(entity, row_ref)" },
+    { sql: `CREATE TABLE IF NOT EXISTS sync_tombstones (
     entity TEXT NOT NULL,
     sync_id TEXT NOT NULL,
     deleted_at TEXT NOT NULL,
     PRIMARY KEY (entity, sync_id)
-  )`);
-
-  await run(`CREATE TABLE IF NOT EXISTS sync_cursors (
+  )` },
+    { sql: `CREATE TABLE IF NOT EXISTS sync_cursors (
     entity TEXT PRIMARY KEY,
     cursor_updated_at TEXT NOT NULL,
     cursor_sync_id TEXT
-  )`);
-
-  await run(`CREATE TABLE IF NOT EXISTS sync_conflicts (
+  )` },
+    { sql: `CREATE TABLE IF NOT EXISTS sync_conflicts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     entity TEXT NOT NULL,
     sync_id TEXT,
@@ -204,7 +235,8 @@ export async function ensureSyncSchema(): Promise<void> {
     local_payload TEXT,
     remote_payload TEXT,
     created_at TEXT NOT NULL
-  )`);
+  )` },
+  ]);
 
   // Offline-only installs don't need a growing queue: a later claim/upload
   // snapshots the current rows anyway. Bound it to the current session.
@@ -212,40 +244,63 @@ export async function ensureSyncSchema(): Promise<void> {
     "SELECT owner_user_id FROM sync_state WHERE id = 1",
   );
   if (!owner?.owner_user_id) {
-    await run("DELETE FROM sync_outbox");
-    await run("DELETE FROM sync_tombstones");
-    await run("DELETE FROM sync_cursors");
+    await runBatch([
+      { sql: "DELETE FROM sync_outbox" },
+      { sql: "DELETE FROM sync_tombstones" },
+      { sql: "DELETE FROM sync_cursors" },
+    ]);
   }
+
+  // Per-table triggers and timestamp normalization, one round trip for the lot.
+  // Column adds stay separate: SQLite validates a trigger against the columns
+  // that exist when it is created.
+  const perTable: SqlStatement[] = [];
+  // Missing sync columns first, in one batch: everything below (backfill and
+  // triggers) reads or writes them.
+  const allColumns = await columnsByTable();
+  const columnAdds: SqlStatement[] = [];
+  for (const spec of SYNC_TABLES) {
+    if (!tables.has(spec.name)) continue;
+    const cols = allColumns.get(spec.name) ?? new Set<string>();
+    if (!cols.has("sync_id")) columnAdds.push({ sql: `ALTER TABLE "${spec.name}" ADD COLUMN sync_id TEXT` });
+    if (!cols.has("updated_at")) {
+      columnAdds.push({
+        sql: `ALTER TABLE "${spec.name}" ADD COLUMN updated_at TEXT NOT NULL DEFAULT '${SYNC_SENTINEL}'`,
+      });
+    }
+    if (!cols.has("deleted_at")) columnAdds.push({ sql: `ALTER TABLE "${spec.name}" ADD COLUMN deleted_at TEXT` });
+  }
+  await runBatch(columnAdds);
+
+  // Which tables actually have rows without an identity. One query instead of
+  // one per table, and on a fresh clinic the answer is usually none.
+  const needsBackfill = await tablesWithMissingSyncIds(
+    SYNC_TABLES.filter((spec) => tables.has(spec.name)).map((spec) => spec.name),
+  );
 
   for (const spec of SYNC_TABLES) {
     if (!tables.has(spec.name)) continue;
-    const cols = await columnsOf(spec.name);
-    const has = (name: string) => cols.some((c) => c.name === name);
-    if (!has("sync_id")) await ensureColumn(spec.name, "sync_id", "TEXT");
-    if (!has("updated_at")) {
-      await ensureColumn(spec.name, "updated_at", `TEXT NOT NULL DEFAULT '${SYNC_SENTINEL}'`);
-    }
-    if (!has("deleted_at")) await ensureColumn(spec.name, "deleted_at", "TEXT");
 
     // Existing rows get their identity before any trigger can observe them.
-    await backfillSyncIds(spec);
+    if (needsBackfill.has(spec.name)) await backfillSyncIds(spec);
 
     // Normalize legacy `datetime('now')` timestamps once (inventory_items and
     // prescription_layouts carried updated_at before sync existed).
-    await run(
-      `UPDATE "${spec.name}" SET updated_at = replace(updated_at, ' ', 'T') || 'Z'
+    perTable.push({
+      sql: `UPDATE "${spec.name}" SET updated_at = replace(updated_at, ' ', 'T') || 'Z'
        WHERE updated_at LIKE '____-__-__ __:__:__'`,
-    );
-    await run(
-      `UPDATE "${spec.name}" SET updated_at = ? WHERE updated_at IS NULL OR updated_at = '' OR updated_at = ?`,
-      [nowIso(), SYNC_SENTINEL],
-    );
+    });
+    perTable.push({
+      sql: `UPDATE "${spec.name}" SET updated_at = ? WHERE updated_at IS NULL OR updated_at = '' OR updated_at = ?`,
+      params: [nowIso(), SYNC_SENTINEL],
+    });
 
-    await run(
-      `CREATE UNIQUE INDEX IF NOT EXISTS idx_${spec.name}_sync_id ON "${spec.name}"(sync_id) WHERE sync_id IS NOT NULL`,
-    );
-    await createSyncTriggers(spec);
+    perTable.push({
+      sql: `CREATE UNIQUE INDEX IF NOT EXISTS idx_${spec.name}_sync_id ON "${spec.name}"(sync_id) WHERE sync_id IS NOT NULL`,
+    });
+    perTable.push(...createSyncTriggers(spec));
   }
+  await runBatch(perTable);
 }
 
 /** Runs once per isolate; failures retry on the next request. */

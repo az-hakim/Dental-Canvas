@@ -1,7 +1,7 @@
 /**
  * Request middleware for the hosted multi-tenant deployment.
  *
- * Runs in front of the whole Hono app (mounted in `api/[...path].ts`), so the
+ * Runs in front of the whole Hono app (mounted in `api/index.mjs`), so the
  * tenant is known before any route handler — and therefore before any SQL —
  * executes.
  *

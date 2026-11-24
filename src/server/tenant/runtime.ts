@@ -16,7 +16,12 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createClient } from "@libsql/client";
-import { setSqlDriverResolver, setTenantKeyResolver, type SqlDriver } from "../db";
+import {
+  setSqlDriverResolver,
+  setTenantKeyResolver,
+  type SqlDriver,
+  type SqlStatement,
+} from "../db";
 import { setPublicTokenRegistrar, type PublicTokenKind } from "./token-registry";
 import { rewriteSchema, rewriteSql, tenantPrefix } from "./sql-prefix";
 import { SCHEMA_SQL } from "../schema.generated";
@@ -76,12 +81,64 @@ export function databaseConfigError(): string | null {
 // Type-only: named type exports differ between @libsql/client versions.
 type Client = ReturnType<typeof createClient>;
 
+/**
+ * Anything that quacks like a request: the client's class is not always the
+ * global `Request` (on Vercel it is a different implementation), so
+ * `instanceof` cannot be used to detect one.
+ */
+interface RequestLike {
+  url: string;
+  method: string;
+  headers: { entries(): IterableIterator<[string, string]> };
+  arrayBuffer(): Promise<ArrayBuffer>;
+}
+
+function isRequestLike(value: unknown): value is RequestLike {
+  if (typeof value !== "object" || value === null) return false;
+  const req = value as Partial<RequestLike>;
+  return (
+    typeof req.url === "string" &&
+    typeof req.arrayBuffer === "function" &&
+    typeof req.headers?.entries === "function"
+  );
+}
+
+/**
+ * `fetch` for the database client.
+ *
+ * The libSQL client hands `fetch` a finished request object. On Vercel's Node
+ * runtime that request reached Turso without its credentials and every query
+ * failed with `SERVER_ERROR: Server returned HTTP status 401`, while the same
+ * URL, headers and body sent as a plain `fetch(url, { … })` were accepted — the
+ * token itself was correct. Rebuilding the request from its parts avoids the
+ * runtime's handling of a prebuilt request from another implementation. Without
+ * this the failure surfaces as a bare "Internal server error" on every
+ * authenticated request.
+ */
+const databaseFetch: typeof fetch = async (input, init) => {
+  if (isRequestLike(input)) {
+    const method = input.method.toUpperCase();
+    const body =
+      method === "GET" || method === "HEAD" ? undefined : new Uint8Array(await input.arrayBuffer());
+    return fetch(input.url, {
+      method,
+      headers: Array.from(input.headers.entries()),
+      body,
+    });
+  }
+  return fetch(input as RequestInfo, init);
+};
+
 let client: Client | null = null;
 
 function db(): Client {
   if (!client) {
     const cfg = readRuntimeConfig();
-    client = createClient({ url: cfg.databaseUrl, authToken: cfg.databaseToken || undefined });
+    client = createClient({
+      url: cfg.databaseUrl,
+      authToken: cfg.databaseToken || undefined,
+      fetch: databaseFetch,
+    });
   }
   return client;
 }
@@ -144,7 +201,27 @@ class LibsqlDriver implements SqlDriver {
     private readonly prefix: string,
   ) {}
 
+  /**
+   * While collecting, `run` queues statements instead of sending them, so a
+   * multi-statement setup step goes out in a few pipelines instead of a round
+   * trip per statement. Reads flush first, keeping the order callers expect.
+   */
+  private queued: { sql: string; args: never }[] | null = null;
+
+  collectStatements(enabled = true): void {
+    if (enabled) this.queued ??= [];
+    else this.queued = null;
+  }
+
+  async flushStatements(): Promise<void> {
+    if (!this.queued?.length) return;
+    const pending = this.queued;
+    this.queued = [];
+    await this.client.batch(pending, "write");
+  }
+
   async query<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T[]> {
+    await this.flushStatements();
     const rs = await this.client.execute({
       sql: rewriteSql(sql, this.prefix),
       args: params as never,
@@ -158,6 +235,10 @@ class LibsqlDriver implements SqlDriver {
   }
 
   async run(sql: string, params: unknown[] = []): Promise<{ changes: number; lastInsertRowid: number }> {
+    if (this.queued) {
+      this.queued.push({ sql: rewriteSql(sql, this.prefix), args: params as never });
+      return { changes: 0, lastInsertRowid: 0 };
+    }
     const rs = await this.client.execute({
       sql: rewriteSql(sql, this.prefix),
       args: params as never,
@@ -166,6 +247,15 @@ class LibsqlDriver implements SqlDriver {
       changes: Number(rs.rowsAffected ?? 0),
       lastInsertRowid: Number(rs.lastInsertRowid ?? 0),
     };
+  }
+
+  /** One pipeline (thus one round trip) for a whole first-run batch. */
+  async batch(statements: SqlStatement[]): Promise<void> {
+    await this.flushStatements();
+    await this.client.batch(
+      statements.map((s) => ({ sql: rewriteSql(s.sql, this.prefix), args: (s.params ?? []) as never })),
+      "write",
+    );
   }
 }
 
@@ -178,14 +268,25 @@ function ensureTenantSchema(clinicId: string): Promise<void> {
   if (!ready) {
     ready = (async () => {
       const statements = rewriteSchema(SCHEMA_SQL, tenantPrefix(clinicId));
-      for (const stmt of statements) {
-        try {
-          await db().execute(stmt);
-        } catch (err) {
-          // Same tolerance as the offline adapter: a statement that a SQLite
-          // build rejects (e.g. an older FTS variant) must not stop the rest
-          // of the schema from being created.
-          console.warn("[tenant] schema statement failed:", (err as Error).message);
+      // One pipeline for the whole schema. Sent statement by statement this is
+      // ~180 round trips, which took 40 s against a remote database and blew
+      // through the function's time limit on a clinic's first request.
+      try {
+        await db().batch(
+          statements.map((sql) => ({ sql, args: [] })),
+          "write",
+        );
+      } catch (err) {
+        console.warn("[tenant] schema batch failed, retrying one statement at a time:", (err as Error).message);
+        for (const stmt of statements) {
+          try {
+            await db().execute(stmt);
+          } catch (inner) {
+            // Same tolerance as the offline adapter: a statement that a SQLite
+            // build rejects (e.g. an older FTS variant) must not stop the rest
+            // of the schema from being created.
+            console.warn("[tenant] schema statement failed:", (inner as Error).message);
+          }
         }
       }
     })().catch((err) => {
