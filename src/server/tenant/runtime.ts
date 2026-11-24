@@ -52,6 +52,27 @@ export function readRuntimeConfig(): RuntimeConfig {
   };
 }
 
+/**
+ * Why this deployment cannot use a database right now, or `null` when it can.
+ *
+ * A serverless host mounts the function bundle read-only, so the local-file
+ * fallback that makes development and the desktop build work cannot create its
+ * database there: the connection fails with SQLITE_CANTOPEN and every request
+ * 500s as a bare "Internal server error", with nothing pointing at the missing
+ * variable. Checking for that case up front turns a mystery crash into a
+ * one-line diagnosis.
+ */
+export function databaseConfigError(): string | null {
+  const { databaseUrl } = readRuntimeConfig();
+  if (!databaseUrl.startsWith("file:")) return null;
+  const serverless = Boolean(env("VERCEL") || env("AWS_LAMBDA_FUNCTION_NAME") || env("AWS_EXECUTION_ENV"));
+  if (!serverless) return null;
+  return (
+    "This deployment has no database configured. Set TURSO_DATABASE_URL and " +
+    "TURSO_AUTH_TOKEN in the project's environment variables, then redeploy."
+  );
+}
+
 // Type-only: named type exports differ between @libsql/client versions.
 type Client = ReturnType<typeof createClient>;
 

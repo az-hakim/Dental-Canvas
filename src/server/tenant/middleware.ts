@@ -13,7 +13,7 @@
 
 import type { Context, Next } from "hono";
 import { bearerToken, authConfigured, verifyAccessToken } from "./auth";
-import { clinicForPublicToken, resolveClinic, withClinic } from "./runtime";
+import { clinicForPublicToken, databaseConfigError, resolveClinic, withClinic } from "./runtime";
 
 /** Endpoints that must work without a session and without tenant data. */
 function isSessionlessPath(path: string): boolean {
@@ -74,15 +74,23 @@ export async function tenantMiddleware(c: Context, next: Next): Promise<Response
 
   const path = new URL(c.req.url).pathname;
   let clinicId: string | null = null;
+  let dbProblem: string | null;
 
   const publicToken = publicTokenForPath(path);
   if (publicToken) {
     clinicId = await clinicForPublicToken(publicToken);
     if (!clinicId) return applyCors(c.json({ error: "Not found" }, 404));
   } else if (isSessionlessPath(path)) {
-    // Health and discovery never read practice data.
+    // Health and discovery never read practice data — /api/config in
+    // particular must keep answering so a misconfigured deployment still
+    // tells the browser that sign-in is required.
     await next();
     return applyCors(c.res);
+  } else if ((dbProblem = databaseConfigError())) {
+    // Everything below reaches the database. Serving an unreadable crash
+    // instead of saying what is missing is what made a deployment look broken
+    // rather than misconfigured.
+    return applyCors(c.json({ error: dbProblem, code: "database_not_configured" }, 503));
   } else if (!authConfigured()) {
     clinicId = defaultClinicId();
   } else {
