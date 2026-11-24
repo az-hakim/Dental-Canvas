@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   CalendarDays, CalendarRange, TrendingUp, Wallet, AlertTriangle, FlaskConical, Users, ListChecks,
   Armchair, Timer,
@@ -7,6 +7,7 @@ import { api } from "@/api";
 import { useApp } from "@/context";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn, formatMoney } from "@/lib/utils";
+import { useDataRefresh } from "@/hooks/use-data-refresh";
 import type { ReportsSummary } from "@/types";
 
 export function ReportsPage() {
@@ -14,19 +15,25 @@ export function ReportsPage() {
   const [data, setData] = useState<ReportsSummary | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        setLoading(true);
-        const res = await api<ReportsSummary>("GET", "/api/reports/summary");
-        setData(res);
-      } catch (err) {
-        app.setError((err as Error).message);
-      } finally {
-        setLoading(false);
-      }
-    })();
+  const load = useCallback(async () => {
+    try {
+      setLoading(true);
+      const res = await api<ReportsSummary>("GET", "/api/reports/summary");
+      setData(res);
+    } catch (err) {
+      app.setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
   }, [app]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  // Appointments, invoices and visits made elsewhere are reflected here
+  // without leaving and re-entering the page.
+  useDataRefresh(load, { debounceMs: 800, intervalMs: 120_000 });
 
   if (loading || !data) {
     return (

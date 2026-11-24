@@ -137,8 +137,8 @@ let applyTimer: number | null = null;
  * URLs) with `access-control-allow-origin: *`, so the fallback probe uses it.
  * Unauthenticated, 60 requests/hour: one check per hour is far inside that.
  */
-const FEED_URL = "https://api.github.com/repos/azshifat007/Dental-Canvas/releases/latest";
-const RELEASES_PAGE = "https://github.com/azshifat007/Dental-Canvas/releases/latest";
+const FEED_URL = "https://api.github.com/repos/az-hakim/Dental-Canvas/releases/latest";
+const RELEASES_PAGE = "https://github.com/az-hakim/Dental-Canvas/releases/latest";
 
 /** Notify React subscribers (the settings card / banner). */
 function emit(next: UpdateState | null): void {

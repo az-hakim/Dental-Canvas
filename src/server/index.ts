@@ -1,7 +1,9 @@
 import { type Context } from "hono";
 import { z } from "zod";
 import { createApp } from "@clawnify/app";
-import { query, get, run } from "./db";
+import { currentTenantKey, query, get, run } from "./db";
+import { registerPublicToken } from "./tenant/token-registry";
+import { publicConfig } from "./tenant/config";
 import {
   DEFAULT_BACKUP_SETTINGS,
   DEFAULT_INVENTORY_SETTINGS,
@@ -94,8 +96,11 @@ const app = createApp<Env>({
 
 type SeedTable = "operatories" | "practitioners" | "treatment_types" | "dentist_notes" | "medicines" | "inventory_items";
 
-let seeded = false;
-let seeding: Promise<void> | null = null;
+// Seeding is per clinic. A warm serverless process serves several tenants, so
+// a single module-level flag would leave every clinic after the first one
+// without its starter rows (empty operatories, no treatment types).
+const seededClinics = new Set<string>();
+const seedingByClinic = new Map<string, Promise<void>>();
 
 async function isEmpty(table: SeedTable): Promise<boolean> {
   const row = await get<{ n: number }>(`SELECT COUNT(*) AS n FROM ${table}`);
@@ -188,20 +193,23 @@ async function seedOnce(): Promise<void> {
 }
 
 async function ensureSeeded(): Promise<void> {
-  if (seeded) return;
+  const clinic = currentTenantKey();
+  if (seededClinics.has(clinic)) return;
   try {
     // Concurrent first requests share one run — the app shell fires four API
     // calls in parallel on load, and without this each would read COUNT(*) = 0
     // and insert its own copy of the sample rows.
-    // shortcut: the shared promise is per-isolate; if duplicates ever show up on
-    // a cold app, claim the seed atomically with an `INSERT OR IGNORE` marker row.
-    seeding ??= seedOnce();
+    let seeding = seedingByClinic.get(clinic);
+    if (!seeding) {
+      seeding = seedOnce();
+      seedingByClinic.set(clinic, seeding);
+    }
     await seeding;
-    seeded = true;
+    seededClinics.add(clinic);
   } catch {
     // Sample data must never fail a request.
-    seeded = false;
-    seeding = null;
+    seededClinics.delete(clinic);
+    seedingByClinic.delete(clinic);
   }
 }
 
@@ -545,18 +553,25 @@ async function ensureColumnMigrations(): Promise<void> {
   }
 }
 
-let migrated = false;
-let migrating: Promise<void> | null = null;
+// Column migrations are idempotent but not free, so each clinic runs them once
+// per process rather than on every request.
+const migratedClinics = new Set<string>();
+const migratingByClinic = new Map<string, Promise<void>>();
 
 async function ensureMigrated(): Promise<void> {
-  if (migrated) return;
-  migrating ??= ensureColumnMigrations()
-    .then(() => {
-      migrated = true;
-    })
-    .catch(() => {
-      migrating = null; // retry on the next request
-    });
+  const clinic = currentTenantKey();
+  if (migratedClinics.has(clinic)) return;
+  let migrating = migratingByClinic.get(clinic);
+  if (!migrating) {
+    migrating = ensureColumnMigrations()
+      .then(() => {
+        migratedClinics.add(clinic);
+      })
+      .catch(() => {
+        migratingByClinic.delete(clinic); // retry on the next request
+      });
+    migratingByClinic.set(clinic, migrating);
+  }
   await migrating;
 }
 
@@ -1170,6 +1185,9 @@ app.post("/api/prescriptions/:id/share", async (c) => {
   if (!existing) return c.json({ error: "Not found" }, 404);
   const token = newPrescriptionShareToken();
   await run("UPDATE prescriptions SET share_token = ?, share_revoked = 0 WHERE id = ?", [token, id]);
+  // The share page is unauthenticated: record which clinic owns the token so a
+  // multi-tenant deployment can route the visit to the right practice.
+  registerPublicToken(token, "prescription");
   return c.json({ share_token: token, share_url: `/share/prescription/${token}` });
 });
 
@@ -4258,6 +4276,7 @@ app.get("/api/dashboard/summary", async (c) => {
     returningPatientsLastMonth,
     newPatientsToday,
     returningPatientsToday,
+    recentPatients,
     upcoming,
   ] = await Promise.all([
     // All patient visits today (the dashboard's headline number). Cancelled
@@ -4334,6 +4353,14 @@ app.get("/api/dashboard/summary", async (c) => {
          )`,
       [today, today], { n: 0 },
     ),
+    // Patients registered in the last day. The panel that shows them reads
+    // this alongside today's visits, so someone added at the front desk shows
+    // up on the dashboard immediately even before they are booked.
+    query<{ id: number; first_name: string; last_name: string; phone: string | null; created_at: string }>(
+      `SELECT id, first_name, last_name, phone, created_at FROM patients
+       WHERE datetime(created_at) >= datetime('now', '-1 day')
+       ORDER BY datetime(created_at) DESC, id DESC LIMIT 8`,
+    ).catch(() => []),
     // Next 5 upcoming events: future patient appointments + open recalls.
     (async () => {
       const [futureAppts, recalls] = await Promise.all([
@@ -4382,6 +4409,7 @@ app.get("/api/dashboard/summary", async (c) => {
     // Per-day figures, the ones the dashboard's goal rings are drawn from.
     new_patients_today: newPatientsToday.n ?? 0,
     returning_patients_today: returningPatientsToday.n ?? 0,
+    recent_patients: recentPatients,
     upcoming,
   });
 });
@@ -5307,6 +5335,11 @@ app.post("/api/search/reindex", async (c) => {
 
 app.get("/api/health", (c) => c.json({ ok: true }));
 
+// Deployment discovery: the web client reads this at boot to decide whether it
+// may show practice data or must show the sign-in gate first. Deliberately
+// public — it carries no practice data and its keys are already in the bundle.
+app.get("/api/config", (c) => c.json(publicConfig()));
+
 // ── Online booking (public self-scheduling) ─────────────────
 //
 // The practice issues booking links (with a random token); patients open
@@ -5365,6 +5398,9 @@ app.post("/api/booking/links", async (c) => {
     [token, d.label ?? "Online booking", d.practitioner_id ?? null, d.treatment_type_id ?? null, d.days_ahead ?? 14, d.active === false ? 0 : 1],
   );
   const row = await get("SELECT * FROM booking_links WHERE id = ?", [result.lastInsertRowid]);
+  // Public booking is unauthenticated: index the token so the visit can be
+  // routed to this practice (see tenant/middleware.ts).
+  registerPublicToken(token, "booking");
   return c.json({ link: row }, 201);
 });
 

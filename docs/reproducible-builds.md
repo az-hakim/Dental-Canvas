@@ -85,7 +85,7 @@ To confirm your local build is the same software CI shipped:
 ```bash
 npm run repro
 node -e 'console.log(require("./.repro/manifest.json").rootHash)'
-curl -sL https://github.com/azshifat007/Dental-Canvas/releases/latest/download/repro-manifest.json \
+curl -sL https://github.com/az-hakim/Dental-Canvas/releases/latest/download/repro-manifest.json \
   | node -e 'process.stdin.on("data",d=>console.log(JSON.parse(d).rootHash))'
 ```
 

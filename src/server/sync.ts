@@ -19,7 +19,8 @@
  * existing hard-delete behaviour is preserved; `sync_tombstones` stops a stale
  * remote update from resurrecting a row the doctor deleted on this device.
  */
-import { get, query, run } from "./db";
+import { currentTenantKey, get, query, run } from "./db";
+import { prefixForKey, stripPrefix } from "./tenant/sql-prefix";
 import {
   SEED_DENTIST_NOTES,
   SEED_INVENTORY,
@@ -72,7 +73,8 @@ const UUID_SQL =
 
 const NOW_SQL = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
 
-let syncReady: Promise<void> | null = null;
+// One prepare pass per clinic per process: every tenant has its own tables.
+const syncReadyByClinic = new Map<string, Promise<void>>();
 
 // ── Schema / triggers ──────────────────────────────────────────────
 
@@ -80,7 +82,10 @@ async function tableNames(): Promise<Set<string>> {
   const rows = await query<{ name: string }>(
     "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
   );
-  return new Set(rows.map((r) => r.name));
+  // Multi-tenant runtimes namespace tables (`t_<clinic>_patients`); the sync
+  // specs are written with plain names, so compare without the prefix.
+  const prefix = prefixForKey(currentTenantKey());
+  return new Set(rows.map((r) => stripPrefix(r.name, prefix)));
 }
 
 async function columnsOf(table: string): Promise<{ name: string; notNull: boolean }[]> {
@@ -245,11 +250,16 @@ export async function ensureSyncSchema(): Promise<void> {
 
 /** Runs once per isolate; failures retry on the next request. */
 export async function ensureSyncReady(): Promise<void> {
-  syncReady ??= ensureSyncSchema().catch((err) => {
-    syncReady = null;
-    throw err;
-  });
-  await syncReady;
+  const clinic = currentTenantKey();
+  let ready = syncReadyByClinic.get(clinic);
+  if (!ready) {
+    ready = ensureSyncSchema().catch((err) => {
+      syncReadyByClinic.delete(clinic);
+      throw err;
+    });
+    syncReadyByClinic.set(clinic, ready);
+  }
+  await ready;
 }
 
 // ── Payloads ───────────────────────────────────────────────────────

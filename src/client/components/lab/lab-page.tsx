@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Plus, Trash2, FlaskConical, AlertTriangle } from "lucide-react";
 import { api } from "@/api";
 import { useApp } from "@/context";
+import { useDataRefresh } from "@/hooks/use-data-refresh";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -48,6 +49,9 @@ export function LabPage({ navigate }: { navigate: (to: string) => void }) {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statusFilter]);
+
+  // A case sent from the agenda or a patient page appears without a reload.
+  useDataRefresh(load, { reasons: ["clinical_note"], debounceMs: 400 });
 
   const overdueCount = useMemo(() => {
     const now = new Date().toISOString();

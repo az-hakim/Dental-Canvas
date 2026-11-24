@@ -8,6 +8,7 @@ import {
   startInPageOfflineMode,
 } from "./offline/in-page-server";
 import { installGlobalCrashGuards } from "./lib/crash-guards";
+import { loadServerConfig } from "./lib/server-config";
 import "./styles.css";
 
 /**
@@ -43,7 +44,11 @@ function showFatalScreen(title: string, detail: string, showRetry: boolean): voi
   btn?.addEventListener("click", () => window.location.reload());
 }
 
-const mount = () => {
+// Ask the deployment whether sign-in is required *before* the first render, so
+// a hosted build can never paint a practice's screens before the server has
+// said they are public, and so the shell's first fetches already carry a token.
+const mount = async () => {
+  await loadServerConfig();
   createRoot(appEl).render(
     <AuthProvider>
       <App />
@@ -101,5 +106,5 @@ if (isTauriDesktop()) {
       );
     });
 } else {
-  mount();
+  void mount();
 }

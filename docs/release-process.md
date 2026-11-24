@@ -87,7 +87,7 @@ Note: if you add Rust dependencies (`src-tauri/Cargo.toml`), don't commit Cargo.
    entry in `src-tauri/Cargo.lock` → `1.4.20`.
 2. Commit, tag `v1.4.20`, push, and let CI build the six packages (Windows NSIS
    installer, Linux deb/rpm/AppImage, macOS DMG, Android APK).
-3. Poll the build run via `gh api repos/azshifat007/Dental-Canvas/actions/runs/<id>/jobs`
+3. Poll the build run via `gh api repos/az-hakim/Dental-Canvas/actions/runs/<id>/jobs`
    until all six jobs report `success`.
 4. Write release notes:
 

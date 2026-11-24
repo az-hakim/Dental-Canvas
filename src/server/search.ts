@@ -1,4 +1,4 @@
-import { query, get, run } from "./db";
+import { currentTenantKey, query, get, run } from "./db";
 
 /**
  * Cross-entity full-text search over the FTS5 `search_index` table
@@ -42,8 +42,9 @@ export interface SearchResponse {
 
 // ── One-time backfill ──────────────────────────────────────────────
 
-let backfilled = false;
-let backfilling: Promise<void> | null = null;
+// Per clinic: each tenant has its own search_index table and settings marker.
+const backfilledClinics = new Set<string>();
+const backfillingByClinic = new Map<string, Promise<void>>();
 
 const BACKFILL_SQLS: [SearchEntityType, string][] = [
   ["patients", `SELECT id AS c0, id AS c1, (last_name || ', ' || first_name) AS c2,
@@ -116,8 +117,9 @@ async function rebuildType(type: SearchEntityType, sql: string): Promise<number>
  * per-isolate `backfilled` flag would still short-circuit the lazy backfill.
  */
 export async function invalidateSearchIndex(): Promise<void> {
-  backfilled = false;
-  backfilling = null;
+  const clinic = currentTenantKey();
+  backfilledClinics.delete(clinic);
+  backfillingByClinic.delete(clinic);
   await run("DELETE FROM settings WHERE key = 'search_backfilled_v1'").catch(() => undefined);
 }
 
@@ -133,9 +135,12 @@ async function backfillSearchIndex(): Promise<void> {
 
 /** Idempotent, runs at most once per isolate; must never fail a request. */
 export async function ensureSearchIndex(): Promise<void> {
-  if (backfilled) return;
+  const clinic = currentTenantKey();
+  if (backfilledClinics.has(clinic)) return;
   try {
-    backfilling ??= (async () => {
+    let backfilling = backfillingByClinic.get(clinic);
+    if (!backfilling) {
+      backfilling = (async () => {
       // Cheap total of the biggest source tables; 0 rows means a fresh DB with
       // nothing to backfill (triggers will index new rows from the start).
       const row = await get<{ n: number }>(
@@ -154,12 +159,14 @@ export async function ensureSearchIndex(): Promise<void> {
           );
         }
       }
-    })();
+      })();
+      backfillingByClinic.set(clinic, backfilling);
+    }
     await backfilling;
-    backfilled = true;
+    backfilledClinics.add(clinic);
   } catch {
-    backfilled = false;
-    backfilling = null;
+    backfilledClinics.delete(clinic);
+    backfillingByClinic.delete(clinic);
   }
 }
 

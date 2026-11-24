@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Bell,
   Calendar as CalendarIcon,
@@ -23,6 +23,7 @@ import { DentalTipCard } from "./dental-tip-card";
 import { InventoryAlertsPanel } from "./inventory-alerts-panel";
 import { visitMetrics } from "./visits-metrics";
 import { openQuickRegister } from "@/lib/quick-register";
+import { useDataRefresh } from "@/hooks/use-data-refresh";
 
 // ── Dashboard API types ────────────────────────────────────────────
 
@@ -48,7 +49,17 @@ export interface DashboardSummary {
   returning_patients_delta_pct: number | null;
   new_patients_today?: number;
   returning_patients_today?: number;
+  /** Patients registered in the last 24h, newest first. */
+  recent_patients?: RecentPatient[];
   upcoming: UpcomingEvent[];
+}
+
+export interface RecentPatient {
+  id: number;
+  first_name: string;
+  last_name: string;
+  phone: string | null;
+  created_at: string;
 }
 
 export interface Birthday {
@@ -76,25 +87,27 @@ export function DashboardPage({
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const loadSummary = useCallback(async () => {
+    try {
+      // The server's clock is UTC; send the clinic's own calendar day so a
+      // 9am appointment in UTC+6 is not counted against yesterday.
+      const res = await api<DashboardSummary>("GET", `/api/dashboard/summary?today=${toIsoDate(new Date())}`);
+      setSummary(res);
+    } catch (err) {
+      app.setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }, [app]);
+
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        // The server's clock is UTC; send the clinic's own calendar day so a
-        // 9am appointment in UTC+6 is not counted against yesterday.
-        const res = await api<DashboardSummary>("GET", `/api/dashboard/summary?today=${toIsoDate(new Date())}`);
-        if (!cancelled) setSummary(res);
-      } catch (err) {
-        app.setError((err as Error).message);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    void loadSummary();
+  }, [loadSummary]);
+
+  // A patient registered from the "New patient" dialog (or anywhere else in
+  // the app) shows up here immediately: the panel re-reads on every data
+  // change, when the window regains focus, and once a minute as a backstop.
+  useDataRefresh(loadSummary, { intervalMs: 60_000, debounceMs: 400 });
 
   const today = useMemo(
     () =>
@@ -166,7 +179,7 @@ export function DashboardPage({
               <VisitsCard summary={summary} loading={loading} />
 
               <div className="stagger grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.08fr)]">
-                <PatientListPanel navigate={navigate} />
+                <PatientListPanel navigate={navigate} recentPatients={summary?.recent_patients ?? []} />
                 <ConsultationPanel navigate={navigate} />
               </div>
 
@@ -383,29 +396,28 @@ function ScheduleCard({ navigate }: { navigate: (to: string) => void }) {
   const [busyDays, setBusyDays] = useState<Set<string>>(new Set());
   const yearMonth = `${cursor.year}-${String(cursor.month + 1).padStart(2, "0")}`;
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        // Pull the month's appointments via two boundary queries (first/last day).
-        const first = `${yearMonth}-01`;
-        const lastDay = new Date(cursor.year, cursor.month + 1, 0).getDate();
-        const last = `${yearMonth}-${String(lastDay).padStart(2, "0")}`;
-        const data = await api<{ appointments: { start_time: string }[] }>(
-          "GET",
-          `/api/appointments?from=${first}&to=${last}`,
-        );
-        if (!cancelled) {
-          setBusyDays(new Set(data.appointments.map((a) => a.start_time.slice(0, 10))));
-        }
-      } catch {
-        /* non-critical decoration */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+  const loadBusyDays = useCallback(async () => {
+    try {
+      // Pull the month's appointments via two boundary queries (first/last day).
+      const first = `${yearMonth}-01`;
+      const lastDay = new Date(cursor.year, cursor.month + 1, 0).getDate();
+      const last = `${yearMonth}-${String(lastDay).padStart(2, "0")}`;
+      const data = await api<{ appointments: { start_time: string }[] }>(
+        "GET",
+        `/api/appointments?from=${first}&to=${last}`,
+      );
+      setBusyDays(new Set(data.appointments.map((a) => a.start_time.slice(0, 10))));
+    } catch {
+      /* non-critical decoration */
+    }
   }, [yearMonth, cursor.year, cursor.month]);
+
+  useEffect(() => {
+    void loadBusyDays();
+  }, [loadBusyDays]);
+
+  // Booking or cancelling an appointment repaints the month's dots at once.
+  useDataRefresh(loadBusyDays, { reasons: ["appointment"], debounceMs: 400 });
 
   const cells = useMemo(() => {
     const firstDow = new Date(cursor.year, cursor.month, 1).getDay();
@@ -497,23 +509,23 @@ function ScheduleCard({ navigate }: { navigate: (to: string) => void }) {
 function BirthdaysCard({ navigate }: { navigate: (to: string) => void }) {
   const [birthdays, setBirthdays] = useState<Birthday[] | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await api<{ birthdays: Birthday[] }>(
-          "GET",
-          `/api/dashboard/birthdays?days=30&today=${toIsoDate(new Date())}`,
-        );
-        if (!cancelled) setBirthdays(res.birthdays);
-      } catch {
-        if (!cancelled) setBirthdays([]); // non-critical panel — fail quiet
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+  const loadBirthdays = useCallback(async () => {
+    try {
+      const res = await api<{ birthdays: Birthday[] }>(
+        "GET",
+        `/api/dashboard/birthdays?days=30&today=${toIsoDate(new Date())}`,
+      );
+      setBirthdays(res.birthdays);
+    } catch {
+      setBirthdays([]); // non-critical panel — fail quiet
+    }
   }, []);
+
+  useEffect(() => {
+    void loadBirthdays();
+  }, [loadBirthdays]);
+
+  useDataRefresh(loadBirthdays, { reasons: ["patient"], debounceMs: 400 });
 
   const today = birthdays?.filter((b) => b.is_today) ?? [];
   const upcoming = birthdays?.filter((b) => !b.is_today) ?? [];

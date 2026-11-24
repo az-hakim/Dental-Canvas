@@ -53,13 +53,23 @@ export function createCloudClient(env: SupabaseEnv): SupabaseClient | null {
   }
 }
 
-const env = readSupabaseEnv();
-
 /** Shared client, or null in offline-only builds. */
-export const supabase: SupabaseClient | null = createCloudClient(env);
+export let supabase: SupabaseClient | null = createCloudClient(readSupabaseEnv());
 
 /** True only when a usable client was actually created. */
-export const cloudConfigured = supabase !== null;
+export let cloudConfigured = supabase !== null;
+
+/**
+ * Create the client from the deployment's own configuration (`GET /api/config`,
+ * read before the app mounts). A hosted build therefore needs no `VITE_*` copy
+ * of the public Supabase values — the server that verifies the tokens owns
+ * them. A client that already exists is never replaced.
+ */
+export function configureCloud(config: SupabaseEnv): void {
+  if (supabase || !hasSupabaseEnv(config)) return;
+  supabase = createCloudClient(config);
+  cloudConfigured = supabase !== null;
+}
 
 /**
  * Where Supabase should send someone after clicking a confirmation or reset

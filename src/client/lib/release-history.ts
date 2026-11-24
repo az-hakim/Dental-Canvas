@@ -12,7 +12,7 @@ const CACHE_KEY = "dental-canvas:release-history";
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // refresh at most daily
 
 export const RELEASES_API_URL =
-  "https://api.github.com/repos/azshifat007/Dental-Canvas/releases?per_page=15";
+  "https://api.github.com/repos/az-hakim/Dental-Canvas/releases?per_page=15";
 
 export interface ReleaseEntry {
   /** e.g. "v1.4.19" */

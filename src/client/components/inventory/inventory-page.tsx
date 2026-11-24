@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useDataRefresh } from "@/hooks/use-data-refresh";
 import {
   AlertTriangle,
   Archive,
@@ -116,6 +117,9 @@ export function InventoryPage() {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Stock movements, alerts and scans made anywhere re-read the shelf list.
+  useDataRefresh(load, { reasons: ["inventory"], debounceMs: 400 });
 
   async function scanNow() {
     setScanning(true);

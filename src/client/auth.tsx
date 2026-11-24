@@ -75,12 +75,16 @@ export interface AuthContextValue {
   dismissRecovery(): void;
 }
 
-const INITIAL_SYNC_STATUS: SyncStatus = {
-  phase: cloudConfigured ? "idle" : "unavailable",
-  lastSyncAt: null,
-  pending: 0,
-  error: null,
-};
+/** Read lazily: the cloud client may only exist after the deployment's
+ * configuration was fetched at boot. */
+function initialSyncStatus(): SyncStatus {
+  return {
+    phase: cloudConfigured ? "idle" : "unavailable",
+    lastSyncAt: null,
+    pending: 0,
+    error: null,
+  };
+}
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
@@ -91,7 +95,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [accountMode, setAccountModeState] = useState<AccountMode>(() => readAccountMode());
   const [recoveryMode, setRecoveryMode] = useState(false);
   const [accountError, setAccountError] = useState<string | null>(null);
-  const [syncStatus, setSyncStatus] = useState<SyncStatus>(INITIAL_SYNC_STATUS);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>(initialSyncStatus);
   const syncOptions = useSyncOptions();
 
   const engineRef = useRef<SyncEngine | null>(null);
@@ -116,7 +120,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         engine.stop();
       }
     }
-    setSyncStatus(INITIAL_SYNC_STATUS);
+    setSyncStatus(initialSyncStatus());
   }, []);
 
   const startEngine = useCallback((nextUser: User) => {

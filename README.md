@@ -220,6 +220,58 @@ clawnify deploy
 
 Or wire it up to Cloudflare Workers + D1 directly using the bindings in `wrangler.toml` (binding `DB`, database name `dental-canvas-db`).
 
+### Hosted web app on Vercel (multi-tenant)
+
+The same app also runs as a hosted web service where several practices sign in
+to their own isolated data. Nothing about the Worker/D1 or desktop deployment
+changes.
+
+```bash
+npm install
+npm run web:dev      # builds, then serves dist/ + /api on http://localhost:3000
+```
+
+`vercel.json` builds `dist/` and routes every `/api/*` call to the
+`api/[...path].ts` function (Node runtime). Set these in
+**Vercel → Settings → Environment Variables**:
+
+| Variable | Purpose |
+| --- | --- |
+| `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` | SQLite for the deployed app (Turso). |
+| `SUPABASE_URL`, `SUPABASE_ANON_KEY` | Token verification **and** the browser's sign-in client. |
+| `CORS_ALLOWED_ORIGINS` | Optional. Origins allowed to call the API (the desktop app). |
+
+Then `vercel --prod` (or connect the repo in the dashboard). Without
+`SUPABASE_URL` the API runs in single-practice mode with no sign-in — fine for
+a private copy, wrong for a public deployment. There is no build-time auth
+variable to forget: the browser asks the deployment what it requires
+(`GET /api/config`) before it renders anything, and receives the public
+Supabase URL and anon key from the same answer. If that request fails on an
+https origin the app fails closed and shows the sign-in gate.
+
+#### How multi-tenancy works
+
+Each clinic's rows live in their own physical table namespace inside the same
+SQLite database (`t_<clinicId>_patients`, `t_<clinicId>_invoices`, …). The
+tenant middleware (`src/server/tenant/middleware.ts`) resolves the caller's
+clinic from their Supabase session — provisioning one on first sign-in — and
+`src/server/tenant/sql-prefix.ts` renames the tables on the way to the driver.
+Because the tables are physically separate, a query cannot reach another
+clinic's data even if it has no tenant filter; indexes, sync triggers and the
+FTS index are namespaced the same way. String literals are never rewritten.
+
+Public links stay public: online-booking and prescription-share tokens are
+indexed in a control table (`dc_public_tokens`) when minted, so an
+unauthenticated visitor is routed to the right clinic and nothing else.
+
+#### Connecting the desktop app to the web app
+
+Build the desktop app with `VITE_API_BASE_URL=https://your-practice.vercel.app`,
+or set it at runtime in **Settings → Account → Server connection**. The desktop
+shell then reads and writes the hosted practice instead of its local database;
+clearing the URL returns it to the local backend. Sign-in follows the server's
+answer, not the URL, so a desktop pointed at a hosted practice always signs in.
+
 ## Project layout
 
 ```

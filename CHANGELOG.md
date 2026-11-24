@@ -3,6 +3,23 @@
 All notable changes to this project will be documented in this file.
 See [Release process](docs/release-process.md) for how releases are cut.
 
+## v1.5.0
+
+- **Hosted web app** — the same app now runs as a multi-tenant web service
+  (Vercel), with the desktop build able to point at it from Settings → Account.
+  Each clinic's rows live in their own table namespace, so a query cannot reach
+  another practice's data, and public booking / share links are routed to the
+  clinic that minted them.
+- **Sign-in is decided by the server** — the browser asks the deployment
+  (`GET /api/config`) whether a session is required and gets the public
+  Supabase values from the same answer, instead of inferring it from the API URL
+  it was built with. A hosted build can no longer run unauthenticated because a
+  build-time variable was missing; if the config request fails on an https
+  origin, the app fails closed.
+- **Live data** — dashboard, patients, reports, finance, inventory and lab
+  screens re-read their data when it changes, when the window regains focus and
+  on a short interval, so a newly registered patient appears without a reload.
+
 ## v1.4.29
 
 - **Settings are split into Basic and Advanced** — the page opens on the five
@@ -54,7 +71,7 @@ See [Release process](docs/release-process.md) for how releases are cut.
 
 - **What's new page** — new **Admin → What's new** history page listing recent
   versions and their changelogs fetched from the GitHub releases feed
-  (`https://api.github.com/repos/azshifat007/Dental-Canvas/releases`), cached
+  (`https://api.github.com/repos/az-hakim/Dental-Canvas/releases`), cached
   in `localStorage` (24 h TTL) and shown fully offline ("Offline copy" chip on
   stale data). Also reachable from the post-update banner and Settings → About.
 - **Scroll-audit fixes** — setup wizard card and sidebar nav scroll containers

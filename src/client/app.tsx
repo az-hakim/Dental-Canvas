@@ -46,6 +46,8 @@ import { PrescriptionSharePage } from "./components/prescriptions/prescription-s
 import { AccountFirstRun } from "./components/account/account-first-run";
 import { AccountConflictScreen } from "./components/account/account-conflict-screen";
 import { PasswordRecoveryDialog } from "./components/account/password-recovery-dialog";
+import { AuthGate } from "./components/account/auth-gate";
+import { authRequired } from "./lib/server-config";
 
 export function App() {
   const state = useAppState();
@@ -53,6 +55,12 @@ export function App() {
   const { path, route, navigate } = useRouter();
   const [searchOpen, setSearchOpen] = useState(false);
   const [registerOpen, setRegisterOpen] = useState(false);
+
+  // Hosted (multi-tenant) deployment: nothing but the public patient pages are
+  // reachable until the server knows which clinic the caller belongs to. The
+  // requirement comes from the deployment itself (`GET /api/config`).
+  const signedIn = auth.status === "signed-in";
+  const needsSignIn = authRequired() && !signedIn;
 
   // Fresh browser/PWA install: offer the optional account once. Desktop gets
   // the same offer as the final setup-wizard step, so it is excluded here.
@@ -187,6 +195,16 @@ export function App() {
   }, []);
   useEffect(() => { reportLocation(window.location.pathname + window.location.search); }, [path]);
 
+  // After signing in (or switching accounts), the shell's lookups were loaded
+  // — or rejected with 401 — before a session existed. Reload them and clear
+  // the transient auth error.
+  useEffect(() => {
+    if (!signedIn) return;
+    state.setError(null);
+    void state.refreshLookups().catch(() => undefined);
+    void state.refreshSidePanels().catch(() => undefined);
+  }, [signedIn, state.refreshLookups, state.refreshSidePanels, state.setError]);
+
   // Full-screen paper routes (prescription/invoice print views) render without
   // nav chrome, like a document viewer. The check-in kiosk is likewise
   // chrome-free — it runs unattended on a waiting-room tablet.
@@ -206,6 +224,20 @@ export function App() {
   // No app chrome; the token scopes what it can see.
   if (route.name === "public-booking") {
     return <PublicBookingPage token={route.token} />;
+  }
+  // Shared prescription — the patient's link, unauthenticated by design.
+  if (route.name === "share-prescription") {
+    return <PrescriptionSharePage token={route.token} />;
+  }
+  if (needsSignIn) {
+    return (
+      <AppContext.Provider value={state}>
+        <AuthGate />
+        <ErrorBanner />
+        <Toaster />
+        <PasswordRecoveryDialog />
+      </AppContext.Provider>
+    );
   }
 
   return (
@@ -250,9 +282,6 @@ export function App() {
               {route.name === "inventory" && <InventoryPage />}
               {route.name === "settings" && <SettingsPage />}
               {route.name === "whats-new" && <WhatsNewPage />}
-              {route.name === "share-prescription" && (
-                <PrescriptionSharePage token={route.token} />
-              )}
               {route.name === "not-found" && (
                 <Placeholder title="Not found" message="That page doesn't exist." />
               )}

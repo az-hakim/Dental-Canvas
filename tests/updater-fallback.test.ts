@@ -26,7 +26,7 @@ vi.mock("@/lib/open-external", () => ({ openExternalUrl: (...args: unknown[]) =>
 const RELEASES = {
   tag_name: "v1.4.23",
   body: "Fixes the medicines list",
-  html_url: "https://github.com/azshifat007/Dental-Canvas/releases/tag/v1.4.23",
+  html_url: "https://github.com/az-hakim/Dental-Canvas/releases/tag/v1.4.23",
   assets: [
     {
       name: "Dental.Canvas_1.4.23_x64-setup.exe",

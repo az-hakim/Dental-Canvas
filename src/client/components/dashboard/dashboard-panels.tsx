@@ -19,6 +19,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { PrescriptionDialog } from "@/components/prescriptions/prescriptions-tab";
+import { useDataRefresh } from "@/hooks/use-data-refresh";
+import type { RecentPatient } from "./dashboard-page";
 import type { Patient } from "@/types";
 
 // ── Dentist note type + add dialog (used by the notes panel) ───────
@@ -143,36 +145,43 @@ function Avatar({ name, index }: { name: string; index: number }) {
   );
 }
 
-export function PatientListPanel({ navigate }: { navigate: (to: string) => void }) {
+export function PatientListPanel({
+  navigate,
+  recentPatients = [],
+}: {
+  navigate: (to: string) => void;
+  recentPatients?: RecentPatient[];
+}) {
   const [filter, setFilter] = useState<ListFilter>("today");
   const [items, setItems] = useState<ListAppointment[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    (async () => {
-      try {
-        const today = new Date();
-        const end = new Date(today);
-        if (filter === "week") end.setDate(end.getDate() + 6);
-        const from = toIsoDateParam(today);
-        const to = toIsoDateParam(end);
-        const data = await api<{ appointments: ListAppointment[] }>(
-          "GET",
-          `/api/appointments?from=${from}&to=${to}`,
-        );
-        if (!cancelled) setItems(data.appointments);
-      } catch {
-        if (!cancelled) setItems([]);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+  const load = useCallback(async () => {
+    try {
+      const today = new Date();
+      const end = new Date(today);
+      if (filter === "week") end.setDate(end.getDate() + 6);
+      const from = toIsoDateParam(today);
+      const to = toIsoDateParam(end);
+      const data = await api<{ appointments: ListAppointment[] }>(
+        "GET",
+        `/api/appointments?from=${from}&to=${to}`,
+      );
+      setItems(data.appointments);
+    } catch {
+      setItems([]);
+    } finally {
+      setLoading(false);
+    }
   }, [filter]);
+
+  useEffect(() => {
+    setLoading(true);
+    void load();
+  }, [load]);
+
+  // Booking, check-in and registration all land here without a reload.
+  useDataRefresh(load, { reasons: ["appointment", "patient"], debounceMs: 400 });
 
   return (
     <section className="dc-card card-lift animate-rise min-w-0 p-5">
@@ -251,6 +260,38 @@ export function PatientListPanel({ navigate }: { navigate: (to: string) => void 
           })
         )}
       </div>
+
+      {/* Registrations that exist but have no visit booked yet. Without this
+          someone added at the front desk was invisible until they were
+          scheduled — the dashboard looked like it had lost the patient. */}
+      {filter === "today" && recentPatients.length > 0 && (
+        <div className="mt-3 border-t border-border/60 pt-2">
+          <p className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+            Recently registered
+          </p>
+          {recentPatients.slice(0, 4).map((p) => (
+            <button
+              key={`new-${p.id}`}
+              type="button"
+              onClick={() => navigate(`/patients/${p.id}`)}
+              className="group flex w-full items-center gap-3 rounded-2xl border border-transparent px-2 py-1.5 text-left transition-colors hover:border-primary/15 hover:bg-primary/[0.04]"
+            >
+              <Avatar name={`${p.first_name} ${p.last_name}`} index={p.id} />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-semibold">
+                  {p.first_name} {p.last_name}
+                </span>
+                <span className="block truncate text-xs text-muted-foreground">
+                  {p.phone || "New patient · no visit booked"}
+                </span>
+              </span>
+              <span className="shrink-0 rounded-xl bg-primary/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-primary">
+                New
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
     </section>
   );
 }

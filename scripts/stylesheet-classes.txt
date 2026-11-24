@@ -6,8 +6,8 @@
 # @source roots in src/client/styles.css (they must stay src/ and
 # index.html) and look for stray files inside src/.
 #
-# source: main @ f8b94b6 (2026-10-31)
-# classes: 1621
+# source: main @ 42e3391 (2026-11-11)
+# classes: 1624
 -bottom-10
 -bottom-6
 -bottom-9
@@ -975,6 +975,7 @@ inset-0
 inset-x-0
 inset-x-1.5
 inset-y-0
+invisible
 italic
 items-baseline
 items-center
@@ -1524,6 +1525,7 @@ text-white/80
 text-white/85
 text-xl
 text-xs
+to-background
 to-blue-600
 to-teal-500/10
 to-teal-600
@@ -1564,6 +1566,7 @@ underline
 underline-offset-2
 underline-offset-4
 uppercase
+via-background
 visible
 w-0.5
 w-1

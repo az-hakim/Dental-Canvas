@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pencil, Plus, Search, UserPlus, Users } from "lucide-react";
 import { useApp } from "@/context";
 import { api } from "@/api";
@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { PageHeader, PageShell } from "@/components/page-shell";
 import { ToothGlyph } from "@/components/dental-art";
 import { formatDate, formatMoney } from "@/lib/utils";
+import { useDataRefresh } from "@/hooks/use-data-refresh";
 import type { Patient } from "@/types";
 import { PatientDialog } from "./patient-dialog";
 
@@ -29,35 +30,35 @@ export function PatientsList({ navigate }: { navigate: (to: string) => void }) {
   /** Patient being quick-edited from its row; null = registering a new one. */
   const [editing, setEditing] = useState<Patient | null>(null);
 
-  // Debounced search
-  useEffect(() => {
-    let cancelled = false;
-    const t = setTimeout(async () => {
-      try {
-        setLoading(true);
-        const [pRes, bRes] = await Promise.all([
-          api<{ patients: Patient[] }>(
-            "GET",
-            q.trim() ? `/api/patients?q=${encodeURIComponent(q.trim())}` : "/api/patients",
-          ),
-          // Balances come from the reports endpoint (open-invoice sums per patient).
-          api<{ balances: Record<string, number> }>("GET", "/api/reports/balances").catch(() => ({ balances: {} })),
-        ]);
-        if (!cancelled) {
-          setPatients(pRes.patients);
-          setBalances(bRes.balances ?? {});
-        }
-      } catch (err) {
-        if (!cancelled) app.setError((err as Error).message);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }, 200);
-    return () => {
-      cancelled = true;
-      clearTimeout(t);
-    };
+  const load = useCallback(async () => {
+    try {
+      setLoading(true);
+      const [pRes, bRes] = await Promise.all([
+        api<{ patients: Patient[] }>(
+          "GET",
+          q.trim() ? `/api/patients?q=${encodeURIComponent(q.trim())}` : "/api/patients",
+        ),
+        // Balances come from the reports endpoint (open-invoice sums per patient).
+        api<{ balances: Record<string, number> }>("GET", "/api/reports/balances").catch(() => ({ balances: {} })),
+      ]);
+      setPatients(pRes.patients);
+      setBalances(bRes.balances ?? {});
+    } catch (err) {
+      app.setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
   }, [q, app]);
+
+  // Debounced search.
+  useEffect(() => {
+    const t = setTimeout(() => void load(), 200);
+    return () => clearTimeout(t);
+  }, [load]);
+
+  // A patient registered or edited anywhere (dashboard dialog, agenda side
+  // panel, patient page) is reflected here without a reload.
+  useDataRefresh(load, { reasons: ["patient", "invoice"], debounceMs: 500 });
 
   const visible = useMemo(() => patients, [patients]);
 

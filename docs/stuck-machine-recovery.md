@@ -49,7 +49,7 @@ diff <(git show 64533d9:src-tauri/tauri.conf.json | grep pubkey) <(grep pubkey s
 ### 2. The updater feed is healthy right now
 
 ```sh
-curl -sL https://github.com/azshifat007/Dental-Canvas/releases/latest/download/latest.json
+curl -sL https://github.com/az-hakim/Dental-Canvas/releases/latest/download/latest.json
 # → {"version":"1.4.19", "platforms":{...signed entries...}}
 ```
 
@@ -61,10 +61,10 @@ certificate SHA-256 out of the APK Signing Block (v2/v3 scheme — `keytool
 "Not a signed jar file" for these APKs).
 
 ```sh
-gh release download v1.4.6  --repo azshifat007/Dental-Canvas --pattern '*.apk' -O 6.apk
-gh release download v1.4.14 --repo azshifat007/Dental-Canvas --pattern '*.apk' -O 14.apk
-gh release download v1.4.15 --repo azshifat007/Dental-Canvas --pattern '*.apk' -O 15.apk
-gh release download v1.4.19 --repo azshifat007/Dental-Canvas --pattern '*.apk' -O 19.apk
+gh release download v1.4.6  --repo az-hakim/Dental-Canvas --pattern '*.apk' -O 6.apk
+gh release download v1.4.14 --repo az-hakim/Dental-Canvas --pattern '*.apk' -O 14.apk
+gh release download v1.4.15 --repo az-hakim/Dental-Canvas --pattern '*.apk' -O 15.apk
+gh release download v1.4.19 --repo az-hakim/Dental-Canvas --pattern '*.apk' -O 19.apk
 node scripts/extract-apk-cert.mjs 6.apk
 node scripts/extract-apk-cert.mjs 14.apk
 node scripts/extract-apk-cert.mjs 15.apk
@@ -105,7 +105,7 @@ after each mutation batch).
 ### A. Windows desktop, stuck at ≤ v1.4.2 (no updater)
 
 1. Download the current installer from the releases page:
-   `https://github.com/azshifat007/Dental-Canvas/releases/latest` →
+   `https://github.com/az-hakim/Dental-Canvas/releases/latest` →
    `Dental.Canvas_<ver>_x64-setup.exe`.
 2. Optional but recommended: Settings → Backup → export a backup file (or rely
    on the folder auto-backup if configured).
@@ -143,7 +143,7 @@ must come **before** anything else.
    the audit trail.
 3. **Uninstall** the app.
 4. Install the current APK:
-   `https://github.com/azshifat007/Dental-Canvas/releases/latest` →
+   `https://github.com/az-hakim/Dental-Canvas/releases/latest` →
    `app-universal-release.apk` (enable "install unknown apps" for the browser
    / file manager when prompted).
 5. Launch, then Settings → Backup → restore the file from step 1.

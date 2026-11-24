@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   BriefcaseMedical,
   CalendarClock,
@@ -14,6 +14,7 @@ import { api } from "@/api";
 import { useApp } from "@/context";
 import type { Route } from "@/hooks/use-router";
 import { cn, formatDate, formatMoney as money, formatTime } from "@/lib/utils";
+import { useDataRefresh } from "@/hooks/use-data-refresh";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -119,35 +120,35 @@ function FinanceContent({ tab, navigate }: { tab: "billing" | "revenue" | "appoi
   const [sortKey, setSortKey] = useState<SortKey>("issued_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
+  const loadFinance = useCallback(async () => {
+    try {
       setLoading(true);
-      try {
-        const params = new URLSearchParams();
-        if (from) params.set("from", from);
-        if (to) params.set("to", to);
-        const qs = params.toString();
-        const res = await api<FinanceOverview>("GET", `/api/finance/overview${qs ? `?${qs}` : ""}`);
-        if (!cancelled) setData(res);
-        if (tab === "appointments") {
-          const ap = await api<{ appointments: FinanceAppointment[] }>(
-            "GET",
-            `/api/appointments${qs ? `?${qs}` : ""}`,
-          );
-          if (!cancelled) setAppts(ap.appointments);
-        }
-      } catch (err) {
-        app.setError((err as Error).message);
-      } finally {
-        if (!cancelled) setLoading(false);
+      const params = new URLSearchParams();
+      if (from) params.set("from", from);
+      if (to) params.set("to", to);
+      const qs = params.toString();
+      const res = await api<FinanceOverview>("GET", `/api/finance/overview${qs ? `?${qs}` : ""}`);
+      setData(res);
+      if (tab === "appointments") {
+        const ap = await api<{ appointments: FinanceAppointment[] }>(
+          "GET",
+          `/api/appointments${qs ? `?${qs}` : ""}`,
+        );
+        setAppts(ap.appointments);
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, from, to]);
+    } catch (err) {
+      app.setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }, [tab, from, to, app]);
+
+  useEffect(() => {
+    void loadFinance();
+  }, [loadFinance]);
+
+  // Payments taken elsewhere (billing tab, agenda) update the ledger live.
+  useDataRefresh(loadFinance, { reasons: ["invoice", "appointment"], debounceMs: 600 });
 
   // Reset to the first page whenever the data or a control changes.
   useEffect(() => setPage(1), [search, perPage, sortKey, sortDir, from, to, tab]);

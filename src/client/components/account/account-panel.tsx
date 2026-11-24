@@ -14,6 +14,7 @@ import { useAuth } from "@/auth";
 import { useSyncStatus } from "@/hooks/use-sync-status";
 import { httpLocalSyncApi } from "@/lib/sync/local-api";
 import { toast } from "@/components/ui/toast";
+import { ServerConnectionCard } from "./server-connection-card";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -211,6 +212,7 @@ export function AccountPanel() {
 
   return (
     <div className="space-y-4">
+      <ServerConnectionCard />
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">

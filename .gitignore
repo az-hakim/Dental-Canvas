@@ -30,3 +30,6 @@ src-tauri/gen/schemas
 /usr/
 /squashfs-root/
 /verify/
+
+# Local SQLite database for the Node/Vercel runtime (npm run web:serve)
+.data/
