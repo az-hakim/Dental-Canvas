@@ -121,6 +121,21 @@ import {
   startInPageOfflineMode,
   isInPageServerLive,
 } from "./in-page-server";
+import { apiBaseUrl } from "@/lib/api-base";
+
+/**
+ * True when this install talks to a hosted practice (the web app) rather than
+ * to a backend bundled on this machine.
+ *
+ * The desktop installers are built with `VITE_API_BASE_URL` pointing at the
+ * deployment (see .github/workflows/build-packages.yml), which makes the same
+ * binary a native shell over the web app: identical records, identical
+ * sign-in, nothing to back up locally. Settings → Account can still point an
+ * install back at its own backend, and this flips with it.
+ */
+export function usesHostedServer(): boolean {
+  return apiBaseUrl() !== "";
+}
 
 export async function activateOfflineMode(): Promise<void> {
   // Every Tauri shell (desktop AND mobile) runs the offline backend. On
@@ -128,6 +143,13 @@ export async function activateOfflineMode(): Promise<void> {
   // registration fails on the tauri.localhost origin, so we fall through to
   // the in-page server instead of failing boot.
   if (!("__TAURI_INTERNALS__" in window)) return;
+
+  // Hosted shell: every request already goes to the practice's server (see
+  // lib/api-base), so there is no local database to start. Booting the
+  // in-worker SQLite server here only delayed the first paint, seeded a
+  // database nothing reads, and left the data-safety cards reporting on a
+  // device store that is not in use.
+  if (usesHostedServer()) return;
 
   try {
     if (!isTauriDesktop() || !("serviceWorker" in navigator)) {

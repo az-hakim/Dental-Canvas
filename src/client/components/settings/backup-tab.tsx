@@ -14,7 +14,7 @@ import {
 import { api } from "@/api";
 import { useApp } from "@/context";
 import { cn } from "@/lib/utils";
-import { getOfflineDbStatus, isTauriDesktop } from "@/offline/activate";
+import { getOfflineDbStatus, isTauriDesktop, usesHostedServer } from "@/offline/activate";
 import {
   chooseDesktopBackupFolder,
   clearDesktopBackupFolder,
@@ -139,7 +139,9 @@ function DataSafetyRow() {
   }, []);
 
   useEffect(() => {
-    if (!isTauriDesktop()) return;
+    // A hosted shell has no device database to report on (see
+    // activateOfflineMode) — polling it would spin forever on "starting…".
+    if (!isTauriDesktop() || usesHostedServer()) return;
     let stop = false;
     // The service worker cold-starts lazily (it's killed after ~30s idle), so
     // the first probe can arrive before the in-worker server finishes init.
@@ -158,7 +160,7 @@ function DataSafetyRow() {
     };
   }, [reload]);
 
-  if (!isTauriDesktop()) return null;
+  if (!isTauriDesktop() || usesHostedServer()) return null;
 
   const ago = (ms: number) => {
     if (ms <= 0) return "never";

@@ -18,6 +18,12 @@ concurrency:
 env:
   VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
   VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
+  # The desktop installers are a native shell over the hosted practice: this is
+  # the deployment they talk to (the same records, the same sign-in). It has to
+  # be set for EVERY job — verify-and-publish rebuilds the frontend and compares
+  # it with the packages, so one job with a different value would fail the
+  # release for a reason that is not a bug.
+  VITE_API_BASE_URL: ${{ vars.DENTAL_CANVAS_SERVER_URL }}
 
 jobs:
   # ── Windows NSIS installer (+ updater artifacts) ────────────────────
@@ -68,19 +74,13 @@ jobs:
         with:
           workspaces: './src-tauri -> target'
 
+      # package.json, Cargo.toml AND Cargo.lock must name the same version. The
+      # updater compares the running binary's crate version with the feed: a
+      # stale Cargo.lock makes a freshly installed Windows build report the old
+      # version, so every check re-offers and reinstalls the same update.
       - name: Check release version
-        shell: pwsh
-        run: |
-          $version = (Get-Content package.json | ConvertFrom-Json).version
-          if ($env:GITHUB_REF_NAME -ne "v$version") {
-            throw "Release tag must match package.json version (v$version)."
-          }
-          # Windows runners check files out with CRLF (core.autocrlf), so
-          # the line-end must tolerate an optional \r or the check false-fails.
-          $cargo = Get-Content src-tauri/Cargo.toml -Raw
-          if ($cargo -notmatch ('(?m)^version = "' + [regex]::Escape($version) + '"\r?$')) {
-            throw 'Cargo.toml version must match package.json.'
-          }
+        shell: bash
+        run: node scripts/check-release-versions.mjs --expect-tag "$GITHUB_REF_NAME"
 
       - name: Build and publish Windows installer
         uses: tauri-apps/tauri-action@v0
@@ -101,7 +101,7 @@ jobs:
             - **macOS** — `..._aarch64.appdmg` (Apple Silicon) — unsigned: right-click → Open on first launch
             - **Android** — `...-universal.apk` (sideload; enable "install unknown apps")
 
-            These releases package the full offline app — UI and the local backend are both bundled, so the clinic can run entirely without internet. Installers are not code-signed.
+            The desktop app is a native shell over the hosted practice: sign in with the same account as the web app and the clinic's records are there — no local database to keep in sync. In-app updates are signed and install themselves at a quiet moment. Installers are not code-signed.
 
             See README.md for setup and limitations.
           # Draft until the verify-and-publish job has checked every package's
@@ -154,12 +154,7 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libssl-dev libgtk-3-dev
 
       - name: Check release version
-        run: |
-          version=$(node -p "require('./package.json').version")
-          if [ "v$version" != "${GITHUB_REF_NAME}" ]; then
-            echo "Tag ${GITHUB_REF_NAME} does not match package.json version v$version" >&2
-            exit 1
-          fi
+        run: node scripts/check-release-versions.mjs --expect-tag "$GITHUB_REF_NAME"
 
       - name: Build Linux packages
         uses: tauri-apps/tauri-action@v0
@@ -215,12 +210,7 @@ jobs:
           workspaces: './src-tauri -> target'
 
       - name: Check release version
-        run: |
-          version=$(node -p "require('./package.json').version")
-          if [ "v$version" != "${GITHUB_REF_NAME}" ]; then
-            echo "Tag ${GITHUB_REF_NAME} does not match package.json version v$version" >&2
-            exit 1
-          fi
+        run: node scripts/check-release-versions.mjs --expect-tag "$GITHUB_REF_NAME"
 
       - name: Build and publish macOS DMG
         uses: tauri-apps/tauri-action@v0
@@ -649,6 +639,25 @@ jobs:
           fi
           echo "cloud sync compiled into dist/: $host"
 
+      # The installers talk to the hosted practice instead of bundling a local
+      # database. A release cut with this variable empty would ship a desktop
+      # app that never sees the clinic's records, so refuse it here.
+      - name: Desktop shell points at the hosted practice
+        env:
+          SERVER: ${{ vars.DENTAL_CANVAS_SERVER_URL }}
+        run: |
+          if [ -z "$SERVER" ]; then
+            echo "::error::DENTAL_CANVAS_SERVER_URL repository variable is empty, so this tag would ship a desktop build that runs its own local database instead of the web app. Set it (e.g. https://dentalcanvas-web.vercel.app) under Settings → Secrets and variables → Actions → Variables, then re-run this workflow."
+            exit 1
+          fi
+          host=${SERVER#https://}
+          host=${host%/}
+          if ! grep -rqF "$host" dist/assets; then
+            echo "::error::dist/ does not contain $host, so the desktop shell was not pointed at the hosted practice."
+            exit 1
+          fi
+          echo "desktop shell points at $SERVER"
+
       # The manifest published below is only useful if rebuilding this tag
       # reproduces it, so prove that here too: a second build of the same commit
       # must match the reference dist/ byte for byte.
@@ -671,6 +680,23 @@ jobs:
             --repo "${GITHUB_REPOSITORY}"
           ls -la verify
 
+      # tauri-action writes a latest.json from each platform job, and the
+      # Windows, Linux and macOS jobs upload concurrently to the same draft
+      # release — whichever finishes last wins. A feed without
+      # `windows-x86_64` makes the installed Windows app report "no update"
+      # forever. Build the feed once here, from the assets that really exist,
+      # and clobber whatever the build jobs wrote.
+      - name: Build the updater feed from the published packages
+        run: |
+          node scripts/build-latest-json.mjs \
+            --dir verify \
+            --version "${GITHUB_REF_NAME#v}" \
+            --tag "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --require windows-x86_64 \
+            --require linux-x86_64 \
+            --out verify/latest.json
+
       - name: Verify embedded frontend in every published package
         run: |
           python3 scripts/verify_embedded_frontend.py \
@@ -687,14 +713,22 @@ jobs:
           EXPECTED_VERSION: ${{ github.ref_name }}
         run: |
           python3 - <<'PY'
-          import json, os
+          import json, os, pathlib
           with open("verify/latest.json") as f:
               feed = json.load(f)
           version = os.environ["EXPECTED_VERSION"].lstrip("v")
           assert feed["version"] == version, f"latest.json version {feed['version']} != {version}"
           for plat in ("windows-x86_64", "linux-x86_64"):
-              assert plat in feed["platforms"], f"latest.json missing {plat}"
-              assert "signature" in feed["platforms"][plat], f"{plat} missing updater signature"
+              entry = feed["platforms"].get(plat)
+              assert entry, f"latest.json missing {plat}"
+              # The signature must be the one shipped beside the artifact: the
+              # updater refuses an unsigned or mismatched package, and a feed
+              # that lists one looks exactly like "no update" to the app.
+              name = entry["url"].rsplit("/", 1)[-1]
+              sig = pathlib.Path("verify", name + ".sig").read_text().strip()
+              assert entry["signature"] == sig, f"{plat} signature does not match {name}.sig"
+          win = feed["platforms"]["windows-x86_64"]["url"]
+          assert win.endswith("-setup.exe"), f"windows feed points at {win}, not the NSIS installer"
           print("latest.json OK:", feed["version"], sorted(feed["platforms"]))
           PY
 
@@ -746,6 +780,7 @@ jobs:
         run: |
           gh release upload "${GITHUB_REF_NAME}" \
             verify/SHA256SUMS repro-manifest.json verify/stylesheet-classes.txt \
+            verify/latest.json \
             --clobber --repo "${GITHUB_REPOSITORY}"
 
       - name: Publish the release

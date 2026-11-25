@@ -7,6 +7,9 @@ name: CI
 env:
   VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
   VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
+  # Same value the desktop installers are built with, so a build that works
+  # here is the build that ships.
+  VITE_API_BASE_URL: ${{ vars.DENTAL_CANVAS_SERVER_URL }}
 
 on:
   push:
@@ -88,6 +91,24 @@ jobs:
 
       - name: Rust crate and JS wrapper agree on major.minor
         run: node scripts/check-tauri-plugin-versions.mjs
+
+  # ── Release version consistency ──────────────────────────────────────────
+  # The tag jobs used to compare package.json with Cargo.toml only, and nothing
+  # compared anything on a normal push. The updater trusts the *crate* version:
+  # a Cargo.toml/Cargo.lock left behind makes a freshly installed Windows build
+  # report the old version, so every check re-offers the same update forever.
+  release-versions:
+    name: release versions agree
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: package.json, Cargo.toml and Cargo.lock name one version
+        run: node scripts/check-release-versions.mjs
 
   # ── Rust dependency graph ────────────────────────────────────────────────
   # Nothing in CI used to open src-tauri/Cargo.lock, so a dependency added to

@@ -264,13 +264,20 @@ Public links stay public: online-booking and prescription-share tokens are
 indexed in a control table (`dc_public_tokens`) when minted, so an
 unauthenticated visitor is routed to the right clinic and nothing else.
 
-#### Connecting the desktop app to the web app
+#### The desktop app is a shell over the web app
 
-Build the desktop app with `VITE_API_BASE_URL=https://your-practice.vercel.app`,
-or set it at runtime in **Settings → Account → Server connection**. The desktop
-shell then reads and writes the hosted practice instead of its local database;
-clearing the URL returns it to the local backend. Sign-in follows the server's
-answer, not the URL, so a desktop pointed at a hosted practice always signs in.
+The released installers are built with
+`VITE_API_BASE_URL=https://dentalcanvas-web.vercel.app` (the
+`DENTAL_CANVAS_SERVER_URL` repository variable in CI), so the native app signs
+in with the same account as the web app and reads and writes the hosted
+practice. With a server URL configured the bundled SQLite backend is not
+started at all: there is no device database, the window paints immediately and
+Settings → Backup manages the practice's snapshots instead of a local store.
+
+**Settings → Account → Server connection** can point an install at a different
+server, or clear the URL to run its own local backend again; clearing it
+reloads and the offline backend starts. Sign-in follows the server's answer,
+not the URL, so a desktop pointed at a hosted practice always signs in.
 
 ## Project layout
 

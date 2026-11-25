@@ -39,4 +39,18 @@ describe("desktop CSP", () => {
     expect(connect).toContain("ipc:");
     expect(connect).toContain("https://api.github.com");
   });
+
+  // The installers are built as a shell over the hosted practice
+  // (VITE_API_BASE_URL), so the API origin is not known at build time here.
+  it("lets a shell pointed at a hosted practice load its data and photos", () => {
+    const csp = desktopCsp();
+    expect(directive(csp, "connect-src")).toContain("https:");
+
+    // Patient photos come from that API or a presigned S3/R2 URL, and
+    // DB-backed ones are handed to <img> as object URLs.
+    const img = directive(csp, "img-src");
+    expect(img).toContain("https:");
+    expect(img).toContain("blob:");
+    expect(img).toContain("data:");
+  });
 });

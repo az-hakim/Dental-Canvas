@@ -19,6 +19,21 @@ See [Release process](docs/release-process.md) for how releases are cut.
 - **Live data** — dashboard, patients, reports, finance, inventory and lab
   screens re-read their data when it changes, when the window regains focus and
   on a short interval, so a newly registered patient appears without a reload.
+- **Desktop installers are a native shell over the web app** — the Windows,
+  Linux and macOS packages are built with `VITE_API_BASE_URL` pointing at the
+  hosted practice, so they sign in with the same account and show the same
+  records instead of a second, empty database. A configured server URL skips the
+  bundled SQLite backend entirely (fast first paint, no misleading "this device"
+  cards), and Settings → Account can still point an install back at its own
+  backend. The Tauri CSP now allows `https:`/`blob:` images so patient photos
+  from the hosted API or S3/R2 render in the webview.
+- **Windows updates can no longer ship a feed that omits Windows** —
+  `latest.json` is generated once by the release job from the packages that
+  really exist, with the signature taken from each `.sig`, and must list
+  `windows-x86_64` pointing at the NSIS setup before the release is published.
+  Release versions are also checked across `package.json`, `Cargo.toml` and
+  `Cargo.lock` on every push: a stale lock made a freshly installed build report
+  the old version and reinstall the same update forever.
 - **One backup story** — the Google Drive mirror is gone. A web deployment
   already keeps the practice in its own database, so Settings → Backup now
   offers exactly one set of tools: portable export/import, the automatic

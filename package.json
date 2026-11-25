@@ -21,6 +21,7 @@
     "lint:sources": "node scripts/check-shadowed-sources.mjs",
     "lint:classes": "node scripts/check-stylesheet-classes.mjs",
     "lint:tauri-plugins": "node scripts/check-tauri-plugin-versions.mjs",
+    "lint:versions": "node scripts/check-release-versions.mjs",
     "styles:write": "node scripts/check-stylesheet-classes.mjs --write",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
