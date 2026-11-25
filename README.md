@@ -189,8 +189,8 @@ payment plans, waiting list, appointments-to-make, recall config,
 prescriptions/items, dentist notes, inventory items/movements/alerts, patient
 image metadata, booking links/requests.
 
-**Deliberately local:** `settings` (may contain SMTP, S3 and Google Drive
-credentials, plus device preferences and the letterhead/doctor profile),
+**Deliberately local:** `settings` (may contain SMTP and S3 credentials, plus
+device preferences and the letterhead/doctor profile),
 backups, the FTS search index, image *bytes* (they live in the configured
 storage bucket or the local DB store), and all sync bookkeeping. A cloud
 `profiles` row holds only sign-up metadata (doctor/clinic name).

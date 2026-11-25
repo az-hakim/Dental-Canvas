@@ -10,6 +10,7 @@ import {
   ShieldAlert,
   Trash2,
 } from "lucide-react";
+import { api } from "@/api";
 import { useAuth } from "@/auth";
 import { useSyncStatus } from "@/hooks/use-sync-status";
 import { deviceSyncEnabled } from "@/lib/server-config";
@@ -39,6 +40,10 @@ export function AccountPanel() {
   const auth = useAuth();
   const status = useSyncStatus();
   const deviceSync = deviceSyncEnabled();
+  // Hosted deployment: the practice lives in the server's database, so there is
+  // no device copy — the "this device" wording would describe something that
+  // does not exist here.
+  const hosted = !deviceSync;
   const [form, setForm] = useState<"signup" | "signin" | null>(null);
   const [signOutRemoveOpen, setSignOutRemoveOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -49,24 +54,32 @@ export function AccountPanel() {
 
   if (!auth.cloudAvailable) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <CloudOff className="h-4 w-4" /> Cloud account
-          </CardTitle>
-          <p className="text-sm text-muted-foreground">
-            This build has no Supabase configuration, so accounts and cloud sync are
-            unavailable. Dental Canvas keeps running fully offline on this device.
-          </p>
-        </CardHeader>
-        <CardContent>
-          <p className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-            A clinic administrator can set <code>VITE_SUPABASE_URL</code> and{" "}
-            <code>VITE_SUPABASE_ANON_KEY</code> before building to enable optional
-            accounts. See the README.
-          </p>
-        </CardContent>
-      </Card>
+      <div className="space-y-4">
+        {/* An offline install can still join a hosted practice: point it at the
+            web app and sign in there with the same account. This has to be
+            reachable without a cloud account, or a doctor whose build has no
+            Supabase configuration could never get to web sign-in. */}
+        <ServerConnectionCard />
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <CloudOff className="h-4 w-4" /> Cloud account
+            </CardTitle>
+            <p className="text-sm text-muted-foreground">
+              This build has no Supabase configuration, so device sync is unavailable.
+              Dental Canvas keeps running fully offline on this device — or connect a
+              hosted practice above to work in the browser app's data.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <p className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+              A clinic administrator can set <code>VITE_SUPABASE_URL</code> and{" "}
+              <code>VITE_SUPABASE_ANON_KEY</code> before building to enable optional
+              accounts. See the README.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
     );
   }
 
@@ -84,6 +97,9 @@ export function AccountPanel() {
   if (!auth.user) {
     return (
       <div className="space-y-4">
+        {/* Offered before sign-in too: an offline app joins the hosted web
+            practice here, then signs in with that practice's account. */}
+        <ServerConnectionCard />
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -200,6 +216,23 @@ export function AccountPanel() {
     setBusy(true);
     setError(null);
     try {
+      if (hosted) {
+        // Delete the practice's records first: removing only the sign-in would
+        // leave them stranded in the server database with nobody able to reach
+        // them. If the account provider then refuses, the records are still
+        // gone — say so plainly instead of reporting a failed deletion.
+        await api("POST", "/api/practice/wipe", { confirm: "DELETE" });
+        try {
+          await auth.deleteAccount(false);
+          toast.success("Your practice records and sign-in were deleted.");
+        } catch {
+          await auth.signOut().catch(() => undefined);
+          toast.info("Practice records deleted. Your sign-in was kept.");
+        }
+        setDeleteOpen(false);
+        window.location.reload();
+        return;
+      }
       await auth.deleteAccount(removeLocalOnDelete);
       setDeleteOpen(false);
       toast.success("Your cloud account and data were deleted.");
@@ -214,15 +247,18 @@ export function AccountPanel() {
 
   return (
     <div className="space-y-4">
-      <ServerConnectionCard />
+      {/* Pointing an install at another server is a desktop/offline concern: in
+          the hosted web app the browser already talks to its own deployment. */}
+      {!hosted && <ServerConnectionCard />}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Cloud className="h-4 w-4" /> Cloud account
           </CardTitle>
           <p className="text-sm text-muted-foreground">
-            Your data is backed up to Supabase and synced across the devices you sign in
-            on. This device stays fully usable offline.
+            {hosted
+              ? "Your practice data is stored in this clinic's database on the server, so every device that signs in sees the same patients, appointments and records."
+              : "Your data is backed up to Supabase and synced across the devices you sign in on. This device stays fully usable offline."}
           </p>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -293,44 +329,50 @@ export function AccountPanel() {
             </Button>
           </div>
           <p className="text-xs text-muted-foreground">
-            Signing out keeps every local patient and appointment on this device.
+            {hosted
+              ? "Signing out ends this browser session only — the clinic's records stay on the server."
+              : "Signing out keeps every local patient and appointment on this device."}
           </p>
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <HardDrive className="h-4 w-4" /> This device
-          </CardTitle>
-          <p className="text-sm text-muted-foreground">
-            Removing local data deletes this device's copy only. Your cloud backup stays
-            available if you sign in again.
-          </p>
-        </CardHeader>
-        <CardContent>
-          <Button
-            variant="outline"
-            className="border-rose-300 text-rose-700 hover:bg-rose-50 dark:border-rose-800 dark:text-rose-300 dark:hover:bg-rose-950/40"
-            onClick={() => {
-              setConfirmText("");
-              setSignOutRemoveOpen(true);
-            }}
-            disabled={busy}
-          >
-            <Trash2 className="h-4 w-4" /> Sign out and remove local data…
-          </Button>
-        </CardContent>
-      </Card>
+      {deviceSync && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <HardDrive className="h-4 w-4" /> This device
+            </CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Removing local data deletes this device's copy only. Your cloud backup stays
+              available if you sign in again.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <Button
+              variant="outline"
+              className="border-rose-300 text-rose-700 hover:bg-rose-50 dark:border-rose-800 dark:text-rose-300 dark:hover:bg-rose-950/40"
+              onClick={() => {
+                setConfirmText("");
+                setSignOutRemoveOpen(true);
+              }}
+              disabled={busy}
+            >
+              <Trash2 className="h-4 w-4" /> Sign out and remove local data…
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       <Card className="border-rose-200 dark:border-rose-900">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-rose-700 dark:text-rose-300">
-            <ShieldAlert className="h-4 w-4" /> Delete cloud account
+            <ShieldAlert className="h-4 w-4" />
+            {hosted ? "Delete practice and account" : "Delete cloud account"}
           </CardTitle>
           <p className="text-sm text-muted-foreground">
-            Permanently deletes your Supabase account and every synced row (patients,
-            appointments, billing, prescriptions). This cannot be undone.
+            {hosted
+              ? "Permanently deletes every record stored for this practice on the server (patients, appointments, billing, prescriptions) and then your sign-in. This cannot be undone."
+              : "Permanently deletes your Supabase account and every synced row (patients, appointments, billing, prescriptions). This cannot be undone."}
           </p>
         </CardHeader>
         <CardContent>
@@ -343,7 +385,8 @@ export function AccountPanel() {
             }}
             disabled={busy}
           >
-            <Trash2 className="h-4 w-4" /> Delete my cloud account and data…
+            <Trash2 className="h-4 w-4" />
+            {hosted ? "Delete all practice data and account…" : "Delete my cloud account and data…"}
           </Button>
         </CardContent>
       </Card>
@@ -389,8 +432,9 @@ export function AccountPanel() {
           <DialogHeader>
             <DialogTitle>Delete your cloud account and data?</DialogTitle>
             <DialogDescription>
-              Your Supabase account and all synced practice data are permanently deleted.
-              This cannot be undone. Type DELETE to confirm.
+              {hosted
+                ? "Every patient, appointment, billing and clinical record for this practice is deleted from the server, then your sign-in is removed. This cannot be undone. Type DELETE to confirm."
+                : "Your Supabase account and all synced practice data are permanently deleted. This cannot be undone. Type DELETE to confirm."}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
@@ -401,20 +445,22 @@ export function AccountPanel() {
               onChange={(e) => setConfirmText(e.target.value)}
               autoFocus
             />
-            <label className="flex items-start gap-2 text-sm">
-              <input
-                type="checkbox"
-                className="mt-0.5 h-4 w-4 accent-[var(--primary)]"
-                checked={removeLocalOnDelete}
-                onChange={(e) => setRemoveLocalOnDelete(e.target.checked)}
-              />
-              <span>
-                Also remove data from this device
-                <span className="block text-xs text-muted-foreground">
-                  Leave unchecked to keep your local records.
+            {!hosted && (
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 accent-[var(--primary)]"
+                  checked={removeLocalOnDelete}
+                  onChange={(e) => setRemoveLocalOnDelete(e.target.checked)}
+                />
+                <span>
+                  Also remove data from this device
+                  <span className="block text-xs text-muted-foreground">
+                    Leave unchecked to keep your local records.
+                  </span>
                 </span>
-              </span>
-            </label>
+              </label>
+            )}
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setDeleteOpen(false)}>

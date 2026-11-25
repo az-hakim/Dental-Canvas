@@ -3,14 +3,10 @@ import {
   Download,
   FileSpreadsheet,
   HardDriveDownload,
-  HardDriveUpload,
   FolderSync,
   Loader2,
-  PlugZap,
-  RefreshCw,
   RotateCcw,
   Save,
-  Search,
   Timer,
   Trash2,
   Upload,
@@ -339,7 +335,6 @@ export function BackupTab() {
       <PortableCard onDone={reload} setMessage={setMessage} />
       <ScheduleCard />
       <DesktopFolderCard setMessage={setMessage} />
-      <GoogleDriveCard setMessage={setMessage} />
 
       <Card>
         <CardHeader>
@@ -490,7 +485,7 @@ function PortableCard({
         setMessage({
           tone: "err",
           text: err.includes("too large")
-            ? "This backup is very large (many x-rays). Try the desktop folder backup or Google Drive transfer instead of the browser import."
+            ? "This backup is very large (many x-rays). Try the desktop folder backup instead of the browser import."
             : err,
         });
         setPendingFile(null);
@@ -835,276 +830,6 @@ Existing backup files in the folder are not deleted.`)) return;
             <p className="text-xs text-muted-foreground">
               Last folder backup: {fmtDate(state.lastRunAt)} · restores via "Import from file" above.
             </p>
-          </>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-// ── Google Drive backup destination ────────────────────────────────
-
-interface DriveStatus {
-  configured: boolean;
-  has_credentials: boolean;
-  enabled: boolean;
-  folder_id: string | null;
-  last_upload_at: string | null;
-  last_upload_ok: boolean;
-  last_upload_error: string | null;
-}
-
-function GoogleDriveCard({ setMessage }: { setMessage: (m: BackupMessage) => void }) {
-  const [status, setStatus] = useState<DriveStatus | null>(null);
-  const [clientId, setClientId] = useState("");
-  const [clientSecret, setClientSecret] = useState("");
-  const [folderId, setFolderId] = useState("");
-  const [hasSecret, setHasSecret] = useState(false);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [loaded, setLoaded] = useState(false);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const [st, cfg] = await Promise.all([
-          api<DriveStatus>("GET", "/api/backup/drive/status"),
-          api<{ settings: Record<string, string> }>("GET", "/api/settings"),
-        ]);
-        setStatus(st);
-        setClientId(cfg.settings.gdrive_client_id ?? "");
-        setHasSecret(Boolean((cfg.settings.gdrive_client_secret ?? "").trim()));
-        setFolderId(cfg.settings.gdrive_folder_id ?? "");
-      } catch {
-        // Status stays null → the card shows a load error state via status.
-      } finally {
-        setLoaded(true);
-      }
-    })();
-  }, []);
-
-  // OAuth round-trip lands back on /settings?tab=backup&drive_connected=1
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const connected = params.get("drive_connected");
-    const error = params.get("drive_error");
-    if (connected || error) {
-      setMessage(
-        connected
-          ? { tone: "ok", text: "Google Drive connected. Enable it below to include automatic backups." }
-          : { tone: "err", text: `Google Drive connection failed: ${error}` },
-      );
-      window.history.replaceState(null, "", "/settings");
-      // Refresh status now that the token is stored.
-      api<DriveStatus>("GET", "/api/backup/drive/status").then(setStatus).catch(() => undefined);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  async function saveConfig(e: React.FormEvent) {
-    e.preventDefault();
-    setBusy("config");
-    setMessage(null);
-    try {
-      const body: Record<string, unknown> = {};
-      if (clientId.trim()) body.client_id = clientId.trim();
-      if (clientSecret.trim()) body.client_secret = clientSecret.trim();
-      body.folder_id = folderId.trim();
-      const res = await api<DriveStatus>("PUT", "/api/backup/drive/config", body);
-      setStatus((s) => (s ? { ...s, ...res } : res));
-      if (clientSecret.trim()) setHasSecret(true);
-      setClientSecret("");
-      setMessage({ tone: "ok", text: "Google Drive configuration saved." });
-    } catch (err) {
-      setMessage({ tone: "err", text: (err as Error).message });
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  function connect() {
-    // Full-page navigation to the consent screen; the callback redirects back.
-    window.location.href = "/api/backup/drive/auth";
-  }
-
-  async function toggleEnabled(enabled: boolean) {
-    setBusy("enable");
-    setMessage(null);
-    try {
-      const res = await api<DriveStatus>("PUT", "/api/backup/drive/config", { enabled });
-      setStatus((s) => (s ? { ...s, enabled: res.enabled } : s));
-    } catch (err) {
-      setMessage({ tone: "err", text: (err as Error).message });
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function testConnection() {
-    setBusy("test");
-    setMessage(null);
-    try {
-      await api("POST", "/api/backup/drive/test");
-      setMessage({ tone: "ok", text: "Test file uploaded to Google Drive — check your folder." });
-      setStatus((s) => (s ? { ...s, last_upload_ok: true, last_upload_error: null, last_upload_at: new Date().toISOString() } : s));
-    } catch (err) {
-      setMessage({ tone: "err", text: (err as Error).message });
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function disconnect() {
-    if (!confirm("Disconnect Google Drive? Your account's access is revoked and automatic uploads stop. The client ID and secret stay saved for next time.")) return;
-    setBusy("disconnect");
-    setMessage(null);
-    try {
-      await api("POST", "/api/backup/drive/disconnect");
-      setStatus((s) => (s ? { ...s, configured: false, enabled: false, last_upload_at: null, last_upload_error: null } : s));
-      setHasSecret(false);
-      setMessage({ tone: "ok", text: "Google Drive disconnected." });
-    } catch (err) {
-      setMessage({ tone: "err", text: (err as Error).message });
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <HardDriveUpload className="h-4 w-4" />
-          Google Drive backup
-        </CardTitle>
-        <p className="text-sm text-muted-foreground">
-          Mirror every backup to your own Google Drive. The app requests only
-          access to files it creates — it can never see other files in your
-          Drive. Requires a Google Cloud OAuth client (Web application) with
-          your site's origin as an authorized redirect origin.
-        </p>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {!loaded ? (
-          <p className="py-2 text-sm text-muted-foreground">Loading…</p>
-        ) : !status ? (
-          <p className="text-sm text-muted-foreground">Could not load Drive status.</p>
-        ) : (
-          <>
-            {/* Connection row */}
-            <div className="flex flex-wrap items-center gap-2 rounded-lg border p-3">
-              <span
-                className={cn(
-                  "inline-flex h-2.5 w-2.5 rounded-full",
-                  status.configured ? "bg-emerald-500" : "bg-muted-foreground/40",
-                )}
-              />
-              <span className="min-w-0 flex-1 text-sm">
-                {status.configured ? (
-                  <>
-                    Connected to Google Drive
-                    {status.enabled && <span className="ml-2 text-xs font-medium text-emerald-700 dark:text-emerald-400">Auto-upload ON</span>}
-                    {!status.enabled && <span className="ml-2 text-xs text-muted-foreground">Auto-upload off</span>}
-                  </>
-                ) : status.has_credentials ? (
-                  "Credentials saved — connect your Google account to finish"
-                ) : (
-                  "Not connected"
-                )}
-              </span>
-              {status.configured ? (
-                <>
-                  <Button size="sm" variant="outline" onClick={testConnection} disabled={busy !== null}>
-                    {busy === "test" ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlugZap className="h-4 w-4" />}
-                    Test
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={disconnect} disabled={busy !== null}>
-                    Disconnect
-                  </Button>
-                </>
-              ) : (
-                <Button size="sm" onClick={connect} disabled={busy !== null}>
-                  {status.has_credentials ? "Connect Google account" : "Connect (save credentials first)"}
-                </Button>
-              )}
-            </div>
-
-            {/* Last upload outcome */}
-            {status.last_upload_at && (
-              <p className="text-xs text-muted-foreground">
-                Last upload: {formatDate(status.last_upload_at)} —{" "}
-                {status.last_upload_ok ? (
-                  <span className="text-emerald-700 dark:text-emerald-400">succeeded</span>
-                ) : (
-                  <span className="text-rose-700 dark:text-rose-400">failed: {status.last_upload_error}</span>
-                )}
-              </p>
-            )}
-
-            {/* Credentials form (also usable to re-point at a different client) */}
-            <form onSubmit={saveConfig} className="grid gap-3 sm:grid-cols-2">
-              <div className="space-y-1.5 sm:col-span-2">
-                <Label className="text-xs">OAuth client ID</Label>
-                <Input
-                  value={clientId}
-                  onChange={(e) => setClientId(e.target.value)}
-                  placeholder="xxxxx.apps.googleusercontent.com"
-                  autoComplete="off"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Client secret {hasSecret && <span className="text-muted-foreground">(saved — leave blank to keep)</span>}</Label>
-                <Input
-                  type="password"
-                  value={clientSecret}
-                  onChange={(e) => setClientSecret(e.target.value)}
-                  placeholder={hasSecret ? "••••••••" : "GOCSPX-…"}
-                  autoComplete="new-password"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Folder ID (optional)</Label>
-                <Input
-                  value={folderId}
-                  onChange={(e) => setFolderId(e.target.value)}
-                  placeholder="Auto: 'Dental Canvas Backups' folder"
-                />
-              </div>
-              <div className="sm:col-span-2">
-                <Button type="submit" variant="outline" size="sm" disabled={busy !== null}>
-                  {busy === "config" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                  Save configuration
-                </Button>
-              </div>
-            </form>
-
-            {/* Auto-upload toggle */}
-            <div className="flex items-center justify-between rounded-lg border p-3">
-              <div className="min-w-0">
-                <p className="text-sm font-medium">Upload automatic backups to Drive</p>
-                <p className="text-xs text-muted-foreground">
-                  When on, every scheduled and manual snapshot is also copied to Drive. Snapshots keep
-                  being stored locally regardless — Drive is a mirror, not a replacement.
-                </p>
-              </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={status.enabled}
-                disabled={!status.configured || busy !== null}
-                onClick={() => toggleEnabled(!status.enabled)}
-                className={cn(
-                  "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-50",
-                  status.enabled ? "bg-primary" : "bg-muted-foreground/30",
-                )}
-              >
-                <span
-                  className={cn(
-                    "inline-block h-4 w-4 rounded-full bg-background shadow transition-transform",
-                    status.enabled ? "translate-x-6" : "translate-x-1",
-                  )}
-                />
-              </button>
-            </div>
           </>
         )}
       </CardContent>

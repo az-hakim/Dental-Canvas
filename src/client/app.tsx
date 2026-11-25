@@ -215,17 +215,6 @@ export function App() {
   // nav chrome, like a document viewer. The check-in kiosk is likewise
   // chrome-free — it runs unattended on a waiting-room tablet.
   const isPrintRoute = route.name === "patient-prescription" || route.name === "patient-invoice";
-  // The check-in kiosk is a full-screen takeover — no app chrome at all.
-  if (route.name === "kiosk") {
-    return (
-      <AppContext.Provider value={state}>
-        <KioskPage />
-        <ErrorBanner />
-        <AccountConflictScreen />
-        <PasswordRecoveryDialog />
-      </AppContext.Provider>
-    );
-  }
   // Public booking page — for patients clicking the practice's booking link.
   // No app chrome; the token scopes what it can see.
   if (route.name === "public-booking") {
@@ -235,12 +224,26 @@ export function App() {
   if (route.name === "share-prescription") {
     return <PrescriptionSharePage token={route.token} />;
   }
+  // The sign-in gate comes before the kiosk: a hosted deployment can only serve
+  // a waiting-room tablet once it knows which clinic the caller belongs to, and
+  // the kiosk's patient lookups would otherwise 401 behind a blank screen.
   if (needsSignIn) {
     return (
       <AppContext.Provider value={state}>
         <AuthGate />
         <ErrorBanner />
         <Toaster />
+        <PasswordRecoveryDialog />
+      </AppContext.Provider>
+    );
+  }
+  // The check-in kiosk is a full-screen takeover — no app chrome at all.
+  if (route.name === "kiosk") {
+    return (
+      <AppContext.Provider value={state}>
+        <KioskPage />
+        <ErrorBanner />
+        <AccountConflictScreen />
         <PasswordRecoveryDialog />
       </AppContext.Provider>
     );

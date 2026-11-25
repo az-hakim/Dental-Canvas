@@ -19,6 +19,11 @@ See [Release process](docs/release-process.md) for how releases are cut.
 - **Live data** — dashboard, patients, reports, finance, inventory and lab
   screens re-read their data when it changes, when the window regains focus and
   on a short interval, so a newly registered patient appears without a reload.
+- **One backup story** — the Google Drive mirror is gone. A web deployment
+  already keeps the practice in its own database, so Settings → Backup now
+  offers exactly one set of tools: portable export/import, the automatic
+  snapshot schedule and the snapshot list. Closing a hosted account also deletes
+  the practice's records on the server instead of leaving them behind.
 
 ## v1.4.29
 

@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { Plus, Trash2, Pencil, Check, X, Clock, UserRound, DatabaseBackup, Palette, Monitor, Sun, Moon, ImageUp, Mail, ReceiptText, MailCheck, QrCode, Printer, Link2, CircleDollarSign, Info, Download, Loader2, RefreshCw, Search, BellRing, Sparkles, FileText, Cloud } from "lucide-react";
 import { useApp } from "@/context";
 import { api } from "@/api";
@@ -17,6 +17,7 @@ import { useTheme, type ThemePreference } from "@/hooks/use-theme";
 import { useRouter } from "@/hooks/use-router";
 import { useAccessibility, type A11yPreference } from "@/hooks/use-accessibility";
 import { useBrandAccent } from "@/hooks/use-brand-accent";
+import { deviceSyncEnabled } from "@/lib/server-config";
 import { brandAccentFromHex } from "@/lib/color";
 import { Contrast } from "lucide-react";
 import { cn, colorClasses, formatMoney } from "@/lib/utils";
@@ -74,6 +75,7 @@ const SETTINGS_TABS: SettingsTab[] = [
 
 const BASIC_TABS = new Set(SETTINGS_TABS.filter((t) => t.scope === "basic").map((t) => t.value));
 const SCOPE_KEY = "dental-canvas:settings-scope";
+const TAB_PARAM = "tab";
 
 function readScope(): SettingsScope {
   try {
@@ -83,9 +85,31 @@ function readScope(): SettingsScope {
   }
 }
 
+/** `/settings?tab=backup` opens that tab — links and bookmarks can point at a setting. */
+function readTab(): string {
+  try {
+    const wanted = new URLSearchParams(window.location.search).get(TAB_PARAM);
+    return wanted && SETTINGS_TABS.some((t) => t.value === wanted) ? wanted : "profile";
+  } catch {
+    return "profile";
+  }
+}
+
 export function SettingsPage() {
   const [scope, setScopeState] = useState<SettingsScope>(readScope);
-  const [tab, setTab] = useState("profile");
+  const [tab, setTabState] = useState(readTab);
+
+  const setTab = useCallback((next: string) => {
+    setTabState(next);
+    try {
+      const url = new URL(window.location.href);
+      if (next === "profile") url.searchParams.delete(TAB_PARAM);
+      else url.searchParams.set(TAB_PARAM, next);
+      window.history.replaceState(null, "", `${url.pathname}${url.search}`);
+    } catch {
+      /* no history API — the tab still switches for this view */
+    }
+  }, []);
 
   function setScope(next: SettingsScope) {
     setScopeState(next);
@@ -98,11 +122,19 @@ export function SettingsPage() {
 
   // Basic mode does not draw an advanced trigger, so a tab left over from
   // Advanced would have no trigger to return to (and no content to show).
+  // Cloud sync is a device feature: a hosted deployment keeps every record in
+  // the server's database, so the tab would only ever explain that it is not
+  // used. Account (sign-in) stays in both builds.
+  const syncAvailable = deviceSyncEnabled();
+
   useEffect(() => {
     if (scope === "basic" && !BASIC_TABS.has(tab)) setTab("profile");
-  }, [scope, tab]);
-
-  const visibleTabs = SETTINGS_TABS.filter((t) => scope === "advanced" || t.scope === "basic");
+    // A ?tab=sync link from another build has no trigger here either.
+    else if (!syncAvailable && tab === "sync") setTab("profile");
+  }, [scope, tab, setTab, syncAvailable]);
+  const visibleTabs = SETTINGS_TABS.filter(
+    (t) => (scope === "advanced" || t.scope === "basic") && (t.value !== "sync" || syncAvailable),
+  );
 
   return (
     <PageShell>
@@ -167,9 +199,11 @@ export function SettingsPage() {
           <TabsContent value="account" className="mt-4">
             <AccountPanel />
           </TabsContent>
-          <TabsContent value="sync" className="mt-4">
-            <SyncTab />
-          </TabsContent>
+          {syncAvailable && (
+            <TabsContent value="sync" className="mt-4">
+              <SyncTab />
+            </TabsContent>
+          )}
           <TabsContent value="appearance" className="mt-4 space-y-4">
             <AppearanceTab />
             <CurrencyCard />
@@ -718,6 +752,7 @@ function CurrencyCard() {
 
 function AboutTab() {
   const { navigate } = useRouter();
+  const hosted = !deviceSyncEnabled();
   return (
     <div className="space-y-4">
       <Card>
@@ -733,8 +768,9 @@ function AboutTab() {
             dental practices. Version <span className="font-medium text-foreground">{__APP_VERSION__}</span>.
           </p>
           <p>
-            The app runs fully offline: the interface and the local database both live on this computer, so the
-            clinic keeps working without internet. When online, it checks for updates automatically once an hour.
+            {hosted
+              ? "The app runs in the browser and keeps the practice in this clinic's database on the server, so every device that signs in sees the same records — nothing to install or update."
+              : "The app runs fully offline: the interface and the local database both live on this computer, so the clinic keeps working without internet. When online, it checks for updates automatically once an hour."}
           </p>
           <div>
             <Button size="sm" variant="outline" onClick={() => navigate("/whats-new")}>

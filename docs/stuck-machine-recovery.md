@@ -137,8 +137,8 @@ must come **before** anything else.
 
 1. **Back up first.** In the old app: Settings → Backup → export the backup
    file (format v3 includes patient images) and copy it off the device (share
-   sheet → Drive/email/cable), or use the configured Google Drive backup.
-   Verify the export exists and opens (file size sanity check) before step 2.
+   sheet → Drive/email/cable). Verify the export exists and opens (file size
+   sanity check) before step 2.
 2. Note the installed version (Android Settings → Apps → Dental Canvas) for
    the audit trail.
 3. **Uninstall** the app.
@@ -152,8 +152,8 @@ must come **before** anything else.
    over it without uninstalling.
 
 If the device is lost/broken before a backup was taken, the data is not
-recoverable from the APK ecosystem — restore the most recent Drive backup or
-a desktop folder auto-backup instead.
+recoverable from the APK ecosystem — restore the most recent exported backup
+file, or a desktop folder auto-backup, instead.
 
 ### D. Android, on ≥ v1.4.15
 

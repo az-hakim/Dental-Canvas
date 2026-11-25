@@ -443,7 +443,7 @@ async function pruneSnapshots(keep: number): Promise<number> {
 /**
  * Create a snapshot row. `kind`/`trigger` describe why it exists; the payload
  * is the same portable format used for file exports, so any snapshot can be
- * downloaded, restored later, or pushed to Google Drive by the caller.
+ * downloaded or restored later.
  */
 export async function createSnapshot(
   kind: "auto" | "manual",

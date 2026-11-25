@@ -29,16 +29,6 @@ import {
 } from "./seed";
 import { reindexSearchIndex, searchAll } from "./search";
 import {
-  authUrl as driveAuthUrl,
-  exchangeCodeForTokens,
-  getDriveSettings,
-  hasCredentials,
-  isDriveConfigured,
-  recordUploadResult,
-  testDriveConnection,
-  uploadJsonToDrive,
-} from "./gdrive";
-import {
   getInventorySettings,
   INVENTORY_CATEGORIES,
   runInventoryScan,
@@ -3888,35 +3878,6 @@ const BackupSettingsInput = z.object({
   auto_backup_keep: z.number().int().min(1).max(100).optional(),
 });
 
-/** Backup filename used for both the local snapshot record and Drive. */
-function backupFilename(stamp: string): string {
-  return `dental-canvas-backup-${stamp}.json`;
-}
-
-/**
- * Push a backup payload to Google Drive (best-effort). Never throws: a Drive
- * outage must not fail the local snapshot — the outcome is recorded in
- * settings so the UI can show what happened.
- */
-async function pushBackupToDrive(payload: BackupPayload, stamp: string): Promise<void> {
-  // Push only the portable tables + image_files JSON — the byte payloads in
-  // image_files are already real bytes and are NOT re-encoded, so Drive gets a
-  // compact copy of the same file set.
-  const compact = {
-    format: payload.format,
-    version: payload.version,
-    created_at: payload.created_at,
-    clinic_name: payload.clinic_name,
-    tables: payload.tables,
-    image_files: payload.image_files,
-  };
-  const json = JSON.stringify(compact);
-  const d = await getDriveSettings();
-  if (!d.enabled || !isDriveConfigured(d)) return;
-  const r = await uploadJsonToDrive(backupFilename(stamp), json, d);
-  await recordUploadResult(r.ok, r.error);
-}
-
 async function getSettingsForBackup() {
   const rows = await query<{ key: string; value: string }>(
     "SELECT key, value FROM settings WHERE key IN ('auto_backup_interval_minutes', 'auto_backup_keep')",
@@ -3985,10 +3946,7 @@ app.get("/api/backup/snapshots", async (c) => {
 // Create a snapshot now (manual).
 app.post("/api/backup/snapshots", async (c) => {
   const backupSettings = await getSettingsForBackup();
-  const { snapshot, payload } = await createSnapshot("manual", "user", backupSettings.auto_backup_keep);
-  // Snapshot stores the full export (real bytes in image_files); Drive gets the
-  // portable tables+image_files copy so the mirror stays compact.
-  await pushBackupToDrive(payload, snapshot.created_at);
+  const { snapshot } = await createSnapshot("manual", "user", backupSettings.auto_backup_keep);
   return c.json({ snapshot }, 201);
 });
 
@@ -4029,152 +3987,24 @@ app.post("/api/backup/auto", async (c) => {
   if (body && typeof body === "object" && (body as { reason?: unknown }).reason === "data_change") {
     trigger = "data_change";
   }
-  const { snapshot, payload } = await createSnapshot("auto", trigger, backupSettings.auto_backup_keep);
-  await pushBackupToDrive(payload, snapshot.created_at);
+  const { snapshot } = await createSnapshot("auto", trigger, backupSettings.auto_backup_keep);
   return c.json({ snapshot }, 201);
 });
 
-// ── Google Drive backup destination ─────────────────────────────
-
-/** Connection status + last upload outcome for the settings card. */
-app.get("/api/backup/drive/status", async (c) => {
-  const d = await getDriveSettings();
-  return c.json({
-    configured: isDriveConfigured(d),
-    connected: isDriveConfigured(d),
-    has_credentials: hasCredentials(d),
-    enabled: d.enabled,
-    folder_id: d.folder_id || null,
-    last_upload_at: d.last_upload_at || null,
-    last_upload_ok: d.last_upload_ok,
-    last_upload_error: d.last_upload_error || null,
-  });
-});
-
-/** Save the OAuth client credentials + optional folder id. */
-const DriveConfigInput = z
-  .object({
-    client_id: z.string().trim().min(1).optional(),
-    client_secret: z.string().trim().min(1).optional(),
-    folder_id: z.string().trim().optional(),
-    enabled: z.boolean().optional(),
-  })
-  .strict();
-
-app.put("/api/backup/drive/config", async (c) => {
-  let body: unknown;
-  try { body = await c.req.json(); } catch { return c.json({ error: "Invalid JSON" }, 400); }
-  const parsed = DriveConfigInput.safeParse(body);
-  if (!parsed.success) return c.json({ error: "Invalid Drive configuration" }, 400);
-
-  const updates: [string, string][] = [];
-  if (parsed.data.client_id !== undefined) updates.push(["gdrive_client_id", parsed.data.client_id]);
-  if (parsed.data.client_secret !== undefined) updates.push(["gdrive_client_secret", parsed.data.client_secret]);
-  if (parsed.data.folder_id !== undefined) updates.push(["gdrive_folder_id", parsed.data.folder_id]);
-  if (parsed.data.enabled !== undefined) updates.push(["gdrive_enabled", parsed.data.enabled ? "1" : "0"]);
-
-  for (const [key, value] of updates) {
-    await run(
-      `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
-      [key, value],
-    );
-  }
-  const d = await getDriveSettings();
-  return c.json({
-    configured: isDriveConfigured(d),
-    connected: isDriveConfigured(d),
-    has_credentials: hasCredentials(d),
-    enabled: d.enabled,
-    folder_id: d.folder_id || null,
-  });
-});
+// ── Delete this practice's records ─────────────────────────────────
 
 /**
- * Start the OAuth consent flow. The redirect URI must exactly match one
- * registered on the Google Cloud OAuth client, so it is derived from the
- * incoming request's own origin.
+ * Hosted deployments keep the practice in the server's database, so closing an
+ * account has to remove those rows too: deleting only the sign-in would leave
+ * the clinic's records stranded with nobody able to reach them. The tenant
+ * middleware scopes this to the caller's own clinic; settings (the clinic's
+ * profile and preferences) are deliberately kept.
  */
-app.get("/api/backup/drive/auth", async (c) => {
-  const d = await getDriveSettings();
-  if (!hasCredentials(d)) {
-    return c.json({ error: "Save the Google OAuth client ID and secret first." }, 400);
-  }
-  const origin = new URL(c.req.url).origin;
-  const redirectUri = `${origin}/api/backup/drive/callback`;
-  return c.redirect(driveAuthUrl(d.client_id, redirectUri));
-});
-
-/**
- * OAuth redirect target. Exchanges the code, stores the refresh token, then
- * bounces the user's browser back to the settings page with a result flag.
- */
-app.get("/api/backup/drive/callback", async (c) => {
-  const origin = new URL(c.req.url).origin;
-  const back = (flag: string, msg: string) =>
-    c.redirect(`${origin}/settings?tab=backup&drive_${flag}=${encodeURIComponent(msg)}`);
-
-  const error = c.req.query("error");
-  if (error) return back("error", c.req.query("error_description") || error);
-
-  const code = c.req.query("code");
-  if (!code) return back("error", "Google did not return an authorization code");
-
-  const d = await getDriveSettings();
-  const redirectUri = `${origin}/api/backup/drive/callback`;
-  const r = await exchangeCodeForTokens(d, code, redirectUri);
-  if (!r.ok) return back("error", r.error);
-
-  await run(
-    `INSERT INTO settings (key, value, updated_at) VALUES ('gdrive_refresh_token', ?, datetime('now'))
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
-    [r.refresh_token],
-  );
-  return back("connected", "1");
-});
-
-/** Revoke + forget the stored tokens. */
-app.post("/api/backup/drive/disconnect", async (c) => {
-  const d = await getDriveSettings();
-  if (d.refresh_token) {
-    await fetch("https://oauth2.googleapis.com/revoke", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ token: d.refresh_token }).toString(),
-    }).catch(() => undefined); // best-effort; local credentials are cleared regardless
-  }
-  for (const key of ["gdrive_refresh_token", "gdrive_last_upload_at", "gdrive_last_upload_ok", "gdrive_last_upload_error"]) {
-    await run("DELETE FROM settings WHERE key = ?", [key]);
-  }
-  await run("INSERT INTO settings (key, value) VALUES ('gdrive_enabled', '0') ON CONFLICT(key) DO UPDATE SET value = '0'");
+app.post("/api/practice/wipe", async (c) => {
+  const parsed = await parseJson(c, z.object({ confirm: z.literal("DELETE") }));
+  if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+  await wipeLocalData();
   return c.json({ ok: true });
-});
-
-/** Push an existing stored snapshot to Drive right now. */
-app.post("/api/backup/drive/upload/:id", async (c) => {
-  const id = intParam(c.req.param("id"));
-  if (!id) return c.json({ error: "Invalid ID" }, 400);
-  const payload = await getSnapshotPayload(id);
-  if (!payload) return c.json({ error: "Snapshot not found" }, 404);
-
-  const d = await getDriveSettings();
-  if (!isDriveConfigured(d)) return c.json({ error: "Google Drive is not connected yet." }, 400);
-
-  const filename = backupFilename(`${payload.created_at.slice(0, 10)}-id${id}`);
-  const json = JSON.stringify(payload);
-  const r = await uploadJsonToDrive(filename, json, d);
-  await recordUploadResult(r.ok, r.error);
-  if (!r.ok) return c.json({ error: r.error }, 502);
-  return c.json({ ok: true, file_id: r.file_id });
-});
-
-/** Connectivity probe: uploads a tiny test file. */
-app.post("/api/backup/drive/test", async (c) => {
-  const d = await getDriveSettings();
-  if (!isDriveConfigured(d)) return c.json({ error: "Google Drive is not connected yet." }, 400);
-  const r = await testDriveConnection(d);
-  if (!r.ok) return c.json({ error: r.error }, 502);
-  return c.json({ ok: true, file_id: r.file_id });
 });
 
 // Import: accept a portable backup JSON, safety-snapshot first, then replace.
@@ -4200,8 +4030,8 @@ app.post("/api/backup/import", async (c) => {
 
   // Verify the real image bytes survived the round-trip: import restores every
   // file_key in image_files into patient_image_blobs (`restoreFromBackup` does
-  // the decoding), so the portable tables only carry metadata. The snapshot +
-  // Drive copy carry the full export.
+  // the decoding), so the portable tables only carry metadata. The snapshot
+  // carries the full export.
   const keep = (await getSettingsForBackup()).auto_backup_keep;
 
   // Safety net: snapshot current state BEFORE destructive import so a bad
@@ -4640,7 +4470,7 @@ app.delete("/api/dentist-notes/:id", async (c) => {
  * real values from the settings table directly; responses show a non-empty
  * placeholder so UI code can still tell "configured ✓" from "empty".
  */
-const SECRET_SETTINGS = new Set(["storage_secret_access_key", "email_api_key", "gdrive_client_secret"]);
+const SECRET_SETTINGS = new Set(["storage_secret_access_key", "email_api_key"]);
 
 function redactSettings(out: Record<string, string>): Record<string, string> {
   for (const key of SECRET_SETTINGS) {
@@ -4653,7 +4483,7 @@ app.get("/api/settings", async (c) => {
   const rows = await query<{ key: string; value: string }>(
     "SELECT key, value FROM settings",
   ).catch(() => []);
-  const out: Record<string, string> = { ...DEFAULT_SETTINGS, ...DEFAULT_PROFILE_SETTINGS, ...DEFAULT_BACKUP_SETTINGS, ...DEFAULT_INVENTORY_SETTINGS, ...DEFAULT_STORAGE_SETTINGS, gdrive_client_id: "", gdrive_client_secret: "", gdrive_folder_id: "", gdrive_enabled: "0" };
+  const out: Record<string, string> = { ...DEFAULT_SETTINGS, ...DEFAULT_PROFILE_SETTINGS, ...DEFAULT_BACKUP_SETTINGS, ...DEFAULT_INVENTORY_SETTINGS, ...DEFAULT_STORAGE_SETTINGS };
   for (const r of rows) out[r.key] = r.value;
   return c.json({ settings: redactSettings(out) });
 });
@@ -4690,7 +4520,7 @@ app.put("/api/settings", async (c) => {
       [key, String(value)],
     );
   }  const rows = await query<{ key: string; value: string }>("SELECT key, value FROM settings");
-  const out: Record<string, string> = { ...DEFAULT_SETTINGS, ...DEFAULT_PROFILE_SETTINGS, ...DEFAULT_BACKUP_SETTINGS, ...DEFAULT_INVENTORY_SETTINGS, ...DEFAULT_STORAGE_SETTINGS, gdrive_client_id: "", gdrive_client_secret: "", gdrive_folder_id: "", gdrive_enabled: "0" };
+  const out: Record<string, string> = { ...DEFAULT_SETTINGS, ...DEFAULT_PROFILE_SETTINGS, ...DEFAULT_BACKUP_SETTINGS, ...DEFAULT_INVENTORY_SETTINGS, ...DEFAULT_STORAGE_SETTINGS };
   for (const r of rows) out[r.key] = r.value;
   return c.json({ settings: redactSettings(out) });
 });
