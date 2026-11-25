@@ -4320,23 +4320,60 @@ app.get("/api/dashboard/summary", async (c) => {
       [day, tzModifier, day, day], { n: 0 },
     );
 
+  // The matching calendar day last month, clamped to the shorter month so the
+  // 31st of March compares with the 28th/29th of February rather than sliding
+  // into March again. Every delta compares this day, not a month-wide total.
+  const lastMonthSameDay = (() => {
+    const d = new Date(`${today}T00:00:00Z`);
+    const daysInLastMonth = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 0)).getUTCDate();
+    d.setUTCDate(1);
+    d.setUTCMonth(d.getUTCMonth() - 1);
+    d.setUTCDate(Math.min(Number(today.slice(8, 10)) || 1, daysInLastMonth));
+    return d.toISOString().slice(0, 10);
+  })();
+
+  // New and returning patients on one calendar day, on the same rules as the
+  // headline total: a non-cancelled appointment or a registration at the front
+  // desk. "New" means no completed visit before that day, so the same day last
+  // month is classified as it was then — the comparison stays like for like.
+  const patientsSeenOn = (day: string) =>
+    safeGet<{ new_n: number | null; returning_n: number | null }>(
+      `SELECT
+         SUM(CASE WHEN NOT EXISTS (
+           SELECT 1 FROM appointments c
+           WHERE c.patient_id = p.id AND c.status = 'completed'
+             AND substr(c.start_time, 1, 10) < ?
+         ) THEN 1 ELSE 0 END) AS new_n,
+         SUM(CASE WHEN EXISTS (
+           SELECT 1 FROM appointments c
+           WHERE c.patient_id = p.id AND c.status = 'completed'
+             AND substr(c.start_time, 1, 10) < ?
+         ) THEN 1 ELSE 0 END) AS returning_n
+       FROM patients p
+       WHERE (EXISTS (
+         SELECT 1 FROM appointments a
+         WHERE a.patient_id = p.id AND substr(a.start_time, 1, 10) = ?
+           AND a.kind = 'patient' AND a.status NOT IN ('cancelled', 'no_show')
+       ) OR date(p.created_at, ?) = ?)`,
+      [day, day, day, tzModifier, day],
+      { new_n: 0, returning_n: 0 },
+    );
+
   const [
     totalToday,
     totalLastMonthSameDay,
     newPatients,
-    newPatientsLastMonth,
     returningPatients,
-    returningPatientsLastMonth,
-    newPatientsToday,
-    returningPatientsToday,
+    seenToday,
+    seenLastMonthSameDay,
     recentPatients,
     upcoming,
   ] = await Promise.all([
     // All patient visits today (the dashboard's headline number). Cancelled
     // visits and no-shows never made it to the chair, so they don't count.
     visitsOn(today),
-    // Same-period figure for last month's first day, used for the delta badge.
-    visitsOn(prevMonthStart),
+    // The same calendar day last month, used for the headline delta badge.
+    visitsOn(lastMonthSameDay),
     // "New" = no prior completed/visited appointment before this month.
     safeGet<{ n: number }>(
       `SELECT COUNT(*) as n FROM patients p
@@ -4347,15 +4384,6 @@ app.get("/api/dashboard/summary", async (c) => {
        )`,
       [startOfMonth], { n: 0 },
     ),
-    safeGet<{ n: number }>(
-      `SELECT COUNT(*) as n FROM patients p
-       WHERE NOT EXISTS (
-         SELECT 1 FROM appointments a
-         WHERE a.patient_id = p.id AND a.status = 'completed'
-           AND substr(a.start_time, 1, 10) < ?
-       )`,
-      [prevMonthStart], { n: 0 },
-    ),
     // "Returning" = everyone with at least one completed visit before this month.
     safeGet<{ n: number }>(
       `SELECT COUNT(DISTINCT a.patient_id) as n FROM appointments a
@@ -4363,47 +4391,14 @@ app.get("/api/dashboard/summary", async (c) => {
          AND substr(a.start_time, 1, 10) < ?`,
       [startOfMonth], { n: 0 },
     ),
-    safeGet<{ n: number }>(
-      `SELECT COUNT(DISTINCT a.patient_id) as n FROM appointments a
-       WHERE a.patient_id IS NOT NULL AND a.status = 'completed'
-         AND substr(a.start_time, 1, 10) < ?`,
-      [prevMonthStart], { n: 0 },
-    ),
-    // New patients *today*: seen or registered today and never completed a
-    // visit before today. The month-wide figures above count the whole patient
-    // base, so they cannot measure a daily goal — the dashboard's new-patient
-    // ring would sit at "hundreds of percent" for any practice with history.
-    // A patient registered today counts, whether or not they are booked yet.
-    safeGet<{ n: number }>(
-      `SELECT COUNT(*) as n FROM patients p
-       WHERE (EXISTS (
-         SELECT 1 FROM appointments a
-         WHERE a.patient_id = p.id AND substr(a.start_time, 1, 10) = ?
-           AND a.kind = 'patient' AND a.status NOT IN ('cancelled', 'no_show')
-       ) OR date(p.created_at, ?) = ?)
-       AND NOT EXISTS (
-         SELECT 1 FROM appointments c
-         WHERE c.patient_id = p.id AND c.status = 'completed'
-           AND substr(c.start_time, 1, 10) < ?
-       )`,
-      [today, tzModifier, today, today], { n: 0 },
-    ),
-    // Returning *today*: in the chair or registered today with a completed
-    // visit before today.
-    safeGet<{ n: number }>(
-      `SELECT COUNT(DISTINCT p.id) as n FROM patients p
-       WHERE (EXISTS (
-         SELECT 1 FROM appointments a
-         WHERE a.patient_id = p.id AND substr(a.start_time, 1, 10) = ?
-           AND a.kind = 'patient' AND a.status NOT IN ('cancelled', 'no_show')
-       ) OR date(p.created_at, ?) = ?)
-       AND EXISTS (
-         SELECT 1 FROM appointments c
-         WHERE c.patient_id = p.id AND c.status = 'completed'
-           AND substr(c.start_time, 1, 10) < ?
-       )`,
-      [today, tzModifier, today, today], { n: 0 },
-    ),
+    // New and returning *today*: seen or registered today (no completed visit
+    // before today for "new"). The month-wide figures above count the whole
+    // patient base, so they cannot measure a daily goal or a daily delta.
+    patientsSeenOn(today),
+    // The same counts for the matching day last month: every delta below
+    // compares today's per-day figure with that day's, never with a total that
+    // covers a different period.
+    patientsSeenOn(lastMonthSameDay),
     // Patients registered in the last day. The panel that shows them reads
     // this alongside today's visits, so someone added at the front desk shows
     // up on the dashboard immediately even before they are booked.
@@ -4453,13 +4448,19 @@ app.get("/api/dashboard/summary", async (c) => {
   return c.json({
     total_visits: totalToday.n ?? 0,
     visits_delta_pct: pct(totalToday.n ?? 0, totalLastMonthSameDay.n ?? 0),
+    // Month-wide patient-base counts, kept for API consumers; the dashboard
+    // tiles use the per-day figures below instead.
     new_patients: newPatients.n ?? 0,
-    new_patients_delta_pct: pct(newPatients.n ?? 0, newPatientsLastMonth.n ?? 0),
     returning_patients: returningPatients.n ?? 0,
-    returning_patients_delta_pct: pct(returningPatients.n ?? 0, returningPatientsLastMonth.n ?? 0),
-    // Per-day figures, the ones the dashboard's goal rings are drawn from.
-    new_patients_today: newPatientsToday.n ?? 0,
-    returning_patients_today: returningPatientsToday.n ?? 0,
+    // Per-day figures behind the tiles and the goal bar. Each delta compares
+    // the same day last month, so a tile never compares two periods.
+    new_patients_today: seenToday.new_n ?? 0,
+    returning_patients_today: seenToday.returning_n ?? 0,
+    new_patients_delta_pct: pct(seenToday.new_n ?? 0, seenLastMonthSameDay.new_n ?? 0),
+    returning_patients_delta_pct: pct(
+      seenToday.returning_n ?? 0,
+      seenLastMonthSameDay.returning_n ?? 0,
+    ),
     recent_patients: recentPatients,
     upcoming,
   });

@@ -21,7 +21,7 @@ import { ChairsideTimer } from "./chairside-timer";
 import { ClinicToolsCard } from "./clinic-tools-card";
 import { DentalTipCard } from "./dental-tip-card";
 import { InventoryAlertsPanel } from "./inventory-alerts-panel";
-import { visitMetrics } from "./visits-metrics";
+import { visitCopy, visitMetrics } from "./visits-metrics";
 import { openQuickRegister } from "@/lib/quick-register";
 import { useDataRefresh } from "@/hooks/use-data-refresh";
 
@@ -287,16 +287,13 @@ function DeltaBadge({ pct, onDark = false }: { pct: number | null; onDark?: bool
 
 function VisitsCard({ summary, loading }: { summary: DashboardSummary | null; loading: boolean }) {
   const m = visitMetrics(summary);
+  const copy = visitCopy(m);
   const goalCopy = loading
     ? "Today's new-patient goal"
     : m.newGoalRemaining === 0
       ? "Daily goal met — nice work"
       : `${m.newGoalRemaining} more to reach today's goal`;
-  const returningCopy = loading
-    ? "Share of today's list"
-    : m.visits === 0
-      ? "No returning patients booked yet"
-      : `${Math.round(m.returningShare)}% of today's ${m.visits === 1 ? "visit" : "visits"}`;
+  const returningCopy = loading ? "Share of today's visits" : copy.returningCaption;
 
   return (
     <section className="dc-card card-lift animate-rise relative overflow-hidden p-5 sm:p-6">
@@ -309,7 +306,7 @@ function VisitsCard({ summary, loading }: { summary: DashboardSummary | null; lo
               <h2 className="text-lg font-semibold tracking-tight">Today's Patient Visits</h2>
             </div>
             <div className="flex shrink-0 items-center gap-2">
-              <span className="text-[11px] font-medium text-muted-foreground">vs last month</span>
+              <span className="text-[11px] font-medium text-muted-foreground">vs same day last month</span>
               <DeltaBadge pct={m.visitsDelta} />
             </div>
           </div>
@@ -326,11 +323,7 @@ function VisitsCard({ summary, loading }: { summary: DashboardSummary | null; lo
             </span>
           </div>
           <p className="mt-1.5 text-sm text-muted-foreground">
-            {loading
-              ? "Loading today's schedule…"
-              : m.visits === 0
-                ? "No patient visits booked yet today — the chairs are ready when they are."
-                : `${m.newToday} new ${m.newToday === 1 ? "patient" : "patients"} and ${m.returningToday} returning, all counted from today's list.`}
+            {loading ? "Loading today's visits…" : copy.headline}
           </p>
 
           {/* New / returning pair — the coloured tiles from the reference design. */}
@@ -368,7 +361,7 @@ function VisitsCard({ summary, loading }: { summary: DashboardSummary | null; lo
                 <span className="text-3xl font-bold leading-none tabular-nums">
                   {loading ? "…" : m.returningToday}
                 </span>
-                <span className="text-xs text-white/75">in the chair</span>
+                <span className="text-xs text-white/75">{copy.returningUnit}</span>
               </div>
               <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/25">
                 <div

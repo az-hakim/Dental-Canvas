@@ -2,7 +2,11 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { clampPercent, ringGeometry, ProgressRing } from "@/components/ui/progress-ring";
-import { NEW_PATIENT_DAILY_TARGET, visitMetrics } from "@/components/dashboard/visits-metrics";
+import {
+  NEW_PATIENT_DAILY_TARGET,
+  visitCopy,
+  visitMetrics,
+} from "@/components/dashboard/visits-metrics";
 
 describe("progress ring geometry", () => {
   it("clamps values that cannot be drawn", () => {
@@ -141,6 +145,28 @@ describe("dashboard visit metrics", () => {
     expect(m.returningToday).toBe(0);
     expect(m.newGoalPercent).toBe(0);
     expect(m.returningShare).toBe(0);
+  });
+
+  it("describes a visit as a booking or a registration, not only a chair", () => {
+    const empty = visitCopy(visitMetrics(null));
+    expect(empty.headline).toContain("No patient visits yet today");
+    expect(empty.headline).toContain("register a patient or book one");
+    expect(empty.returningCaption).toBe("No returning patients yet today");
+
+    const busy = visitCopy(
+      visitMetrics({ total_visits: 4, new_patients_today: 1, returning_patients_today: 3 }),
+    );
+    expect(busy.headline).toBe(
+      "1 new patient and 3 returning, from today's bookings and registrations.",
+    );
+    expect(busy.returningUnit).toBe("today");
+    expect(busy.returningCaption).toBe("75% of today's visits");
+
+    // Copy never claims a visit has to be booked or seated first.
+    for (const copy of [empty, busy]) {
+      const prose = `${copy.headline} ${copy.returningUnit} ${copy.returningCaption}`;
+      expect(prose).not.toMatch(/in the chair|booked yet/i);
+    }
   });
 
   it("passes the month-over-month deltas through for the three chips", () => {

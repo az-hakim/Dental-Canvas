@@ -6,9 +6,9 @@
  * derived from the summary the API actually returns — no placeholder scores.
  *
  * The card answers three questions and nothing more:
- *   - headline → how many patients are in today
+ *   - headline → how many patient visits today (booked or registered)
  *   - New patients tile → progress toward the ten-a-day front-desk goal
- *   - Returning tile → how much of today's list is repeat business
+ *   - Returning tile → how much of today's visits are repeat business
  *
  * Chair utilization deliberately has no metric here: the dashboard is a
  * front-desk view, and chair time is reported on the Reports page where the
@@ -33,9 +33,9 @@ export interface VisitSummaryLike {
 export interface VisitMetrics {
   /** Today's patient visits (the card's headline number). */
   visits: number;
-  /** New patients in the chair today (no completed visit before today). */
+  /** New patients seen or registered today (no completed visit before today). */
   newToday: number;
-  /** Returning patients in the chair today (a completed visit before today). */
+  /** Returning patients seen or registered today (a completed visit before today). */
   returningToday: number;
   /** The daily new-patient goal the tile's bar is measured against. */
   newGoal: number;
@@ -47,10 +47,19 @@ export interface VisitMetrics {
   returningShare: number;
   /** Visits vs the same day last month; `null` when there is nothing to compare. */
   visitsDelta: number | null;
-  /** New patients vs the same day last month. */
+  /** New patients today vs the same day last month. */
   newDelta: number | null;
-  /** Returning patients vs the same day last month. */
+  /** Returning patients today vs the same day last month. */
   returningDelta: number | null;
+}
+
+export interface VisitCopy {
+  /** The sentence under the headline number. */
+  headline: string;
+  /** Unit shown beside the returning tile's number. */
+  returningUnit: string;
+  /** Caption under the returning tile's bar. */
+  returningCaption: string;
 }
 
 /** Non-negative whole count; anything missing or malformed counts as zero. */
@@ -87,5 +96,26 @@ export function visitMetrics(summary: VisitSummaryLike | null | undefined): Visi
     visitsDelta: delta(summary?.visits_delta_pct),
     newDelta: delta(summary?.new_patients_delta_pct),
     returningDelta: delta(summary?.returning_patients_delta_pct),
+  };
+}
+
+/**
+ * The card's prose. A visit is now a booking *or* a registration at the front
+ * desk, so the copy says "visits" and "registered" rather than talking about
+ * chairs and booked slots — a patient added today counts before they are
+ * booked, and the sentence should not claim otherwise.
+ */
+export function visitCopy(m: VisitMetrics): VisitCopy {
+  const headline =
+    m.visits === 0
+      ? "No patient visits yet today — register a patient or book one and it shows here."
+      : `${m.newToday} new ${m.newToday === 1 ? "patient" : "patients"} and ${m.returningToday} returning, from today's bookings and registrations.`;
+  return {
+    headline,
+    returningUnit: "today",
+    returningCaption:
+      m.visits === 0
+        ? "No returning patients yet today"
+        : `${Math.round(m.returningShare)}% of today's ${m.visits === 1 ? "visit" : "visits"}`,
   };
 }

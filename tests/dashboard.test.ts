@@ -243,6 +243,109 @@ describe("GET /api/dashboard/summary", () => {
     expect(data.new_patients_today).toBe(1);
   });
 
+  it("compares each delta with the same day last month, like for like", async () => {
+    const now = new Date();
+    const iso = (y: number, m: number, day: number) =>
+      `${y}-${String(m + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    // The 15th exists in every month, so both sides of the comparison do too.
+    const today = iso(now.getFullYear(), now.getMonth(), 15);
+    const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 15);
+    const sameDayLastMonth = iso(lastMonth.getFullYear(), lastMonth.getMonth(), 15);
+
+    // today: one new patient (no completed visit ever) and one returning one.
+    const newcomer = await seedPatient({ first_name: "New", last_name: "Today" });
+    const regular = await seedPatient({ first_name: "Reg", last_name: "Today" });
+    // last month, same day: two new patients and one returning patient.
+    const thenNew1 = await seedPatient({ first_name: "New", last_name: "Then" });
+    const thenNew2 = await seedPatient({ first_name: "Also", last_name: "Then" });
+    const thenRegular = await seedPatient({ first_name: "Reg", last_name: "Then" });
+
+    const backdate = async (id: number, monthsAgo: number) => {
+      const d = new Date(now.getFullYear(), now.getMonth() - monthsAgo, 5);
+      await ctx.db
+        .prepare("UPDATE patients SET created_at = ? WHERE id = ?")
+        .bind(`${iso(d.getFullYear(), d.getMonth(), 5)} 09:00:00`, id)
+        .run();
+    };
+    await backdate(newcomer, 3);
+    await backdate(regular, 5);
+    await backdate(thenNew1, 2);
+    await backdate(thenNew2, 2);
+    await backdate(thenRegular, 6);
+
+    // Prior completed history decides who is "returning".
+    const earlier = (monthsAgo: number, day = 5) => {
+      const d = new Date(now.getFullYear(), now.getMonth() - monthsAgo, day);
+      return {
+        start_time: `${iso(d.getFullYear(), d.getMonth(), day)}T10:00:00`,
+        end_time: `${iso(d.getFullYear(), d.getMonth(), day)}T10:30:00`,
+        status: "completed",
+      };
+    };
+    await seedAppointment({ patient_id: regular, ...earlier(2) });
+    await seedAppointment({ patient_id: thenRegular, ...earlier(3) });
+
+    // Today's visits.
+    await seedAppointment({
+      patient_id: newcomer,
+      start_time: `${today}T09:00:00`,
+      end_time: `${today}T09:30:00`,
+    });
+    await seedAppointment({
+      patient_id: regular,
+      start_time: `${today}T11:00:00`,
+      end_time: `${today}T11:30:00`,
+    });
+    // The same day last month: three visits.
+    for (const [index, pid] of [thenNew1, thenNew2, thenRegular].entries()) {
+      await seedAppointment({
+        patient_id: pid,
+        start_time: `${sameDayLastMonth}T${10 + index}:00:00`,
+        end_time: `${sameDayLastMonth}T${10 + index}:30:00`,
+      });
+    }
+
+    const res = await app.request(
+      `/api/dashboard/summary?today=${today}&tz=0`,
+      undefined,
+      { DB: ctx.db },
+    );
+    const data = (await res.json()) as {
+      total_visits: number;
+      visits_delta_pct: number | null;
+      new_patients_today: number;
+      new_patients_delta_pct: number | null;
+      returning_patients_today: number;
+      returning_patients_delta_pct: number | null;
+    };
+    expect(data.total_visits).toBe(2);
+    expect(data.new_patients_today).toBe(1);
+    expect(data.returning_patients_today).toBe(1);
+    // 2 visits vs 3 on the same day last month, not vs the 1st of last month
+    // (which had none) and not vs a month-wide patient total.
+    expect(data.visits_delta_pct).toBe(-33);
+    // 1 new patient vs 2 that day; the month-wide base count would be 3 vs 3.
+    expect(data.new_patients_delta_pct).toBe(-50);
+    // 1 returning patient vs 1: flat, where month-wide totals would be up 100%.
+    expect(data.returning_patients_delta_pct).toBe(0);
+  });
+
+  it("reports no delta when the same day last month had no visits", async () => {
+    // A patient registered today is today's only visit; last month is empty.
+    await seedPatient();
+    const res = await app.request("/api/dashboard/summary", undefined, { DB: ctx.db });
+    const data = (await res.json()) as {
+      total_visits: number;
+      visits_delta_pct: number | null;
+      new_patients_delta_pct: number | null;
+      returning_patients_delta_pct: number | null;
+    };
+    expect(data.total_visits).toBe(1);
+    expect(data.visits_delta_pct).toBeNull();
+    expect(data.new_patients_delta_pct).toBeNull();
+    expect(data.returning_patients_delta_pct).toBeNull();
+  });
+
   it("reports no patients in the chair on a fresh practice", async () => {
     const res = await app.request("/api/dashboard/summary", undefined, { DB: ctx.db });
     const data = (await res.json()) as {
