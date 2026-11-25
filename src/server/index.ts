@@ -4288,6 +4288,38 @@ app.get("/api/dashboard/summary", async (c) => {
   const safeGet = <T,>(sql: string, params: unknown[] = [], fallback: T) =>
     get<T>(sql, params).catch(() => fallback as T | undefined).then((v) => v ?? fallback);
 
+  // `patients.created_at` is a UTC timestamp, so "registered today" has to be
+  // shifted into the clinic's timezone before the date is compared — a
+  // registration at 01:00 in Dhaka (UTC+6) is still yesterday in UTC. The
+  // client sends its offset in minutes east of UTC (the negated
+  // getTimezoneOffset()); anything missing or out of range falls back to UTC.
+  const requestedOffset = Number.parseInt(c.req.query("tz") ?? "", 10);
+  const tzOffset =
+    Number.isFinite(requestedOffset) && Math.abs(requestedOffset) <= 14 * 60 ? requestedOffset : 0;
+  const tzModifier = `${tzOffset} minutes`;
+
+  // Patient visits on one calendar day: every non-cancelled patient
+  // appointment in a chair, plus patients registered at the front desk that
+  // day. A registration is a visit even before it is booked — registering a
+  // new patient used to leave the headline card at zero. Anyone registered
+  // and also booked on the same day is counted once: the registration side
+  // skips patients who already have an appointment that day.
+  const visitsOn = (day: string) =>
+    safeGet<{ n: number }>(
+      `SELECT
+         (SELECT COUNT(*) FROM appointments a
+          WHERE substr(a.start_time, 1, 10) = ? AND a.kind = 'patient'
+            AND a.status NOT IN ('cancelled', 'no_show'))
+         + (SELECT COUNT(*) FROM patients p
+            WHERE date(p.created_at, ?) = ?
+              AND NOT EXISTS (
+                SELECT 1 FROM appointments a2
+                WHERE a2.patient_id = p.id AND substr(a2.start_time, 1, 10) = ?
+                  AND a2.kind = 'patient' AND a2.status NOT IN ('cancelled', 'no_show')
+              )) AS n`,
+      [day, tzModifier, day, day], { n: 0 },
+    );
+
   const [
     totalToday,
     totalLastMonthSameDay,
@@ -4302,15 +4334,9 @@ app.get("/api/dashboard/summary", async (c) => {
   ] = await Promise.all([
     // All patient visits today (the dashboard's headline number). Cancelled
     // visits and no-shows never made it to the chair, so they don't count.
-    safeGet<{ n: number }>(
-      "SELECT COUNT(*) as n FROM appointments WHERE substr(start_time, 1, 10) = ? AND kind = 'patient' AND status NOT IN ('cancelled', 'no_show')",
-      [today], { n: 0 },
-    ),
+    visitsOn(today),
     // Same-period figure for last month's first day, used for the delta badge.
-    safeGet<{ n: number }>(
-      "SELECT COUNT(*) as n FROM appointments WHERE substr(start_time, 1, 10) = ? AND kind = 'patient' AND status NOT IN ('cancelled', 'no_show')",
-      [prevMonthStart], { n: 0 },
-    ),
+    visitsOn(prevMonthStart),
     // "New" = no prior completed/visited appointment before this month.
     safeGet<{ n: number }>(
       `SELECT COUNT(*) as n FROM patients p
@@ -4343,36 +4369,40 @@ app.get("/api/dashboard/summary", async (c) => {
          AND substr(a.start_time, 1, 10) < ?`,
       [prevMonthStart], { n: 0 },
     ),
-    // New patients *today*: in the chair today and never completed a visit
-    // before today. The month-wide figures above count the whole patient base,
-    // so they cannot measure a daily goal — the dashboard's new-patient ring
-    // would sit at "hundreds of percent" for any practice with history.
+    // New patients *today*: seen or registered today and never completed a
+    // visit before today. The month-wide figures above count the whole patient
+    // base, so they cannot measure a daily goal — the dashboard's new-patient
+    // ring would sit at "hundreds of percent" for any practice with history.
+    // A patient registered today counts, whether or not they are booked yet.
     safeGet<{ n: number }>(
       `SELECT COUNT(*) as n FROM patients p
-       WHERE EXISTS (
+       WHERE (EXISTS (
          SELECT 1 FROM appointments a
          WHERE a.patient_id = p.id AND substr(a.start_time, 1, 10) = ?
            AND a.kind = 'patient' AND a.status NOT IN ('cancelled', 'no_show')
-       )
+       ) OR date(p.created_at, ?) = ?)
        AND NOT EXISTS (
          SELECT 1 FROM appointments c
          WHERE c.patient_id = p.id AND c.status = 'completed'
            AND substr(c.start_time, 1, 10) < ?
        )`,
-      [today, today], { n: 0 },
+      [today, tzModifier, today, today], { n: 0 },
     ),
-    // Returning *today*: in the chair today with a completed visit before today.
+    // Returning *today*: in the chair or registered today with a completed
+    // visit before today.
     safeGet<{ n: number }>(
-      `SELECT COUNT(DISTINCT p.id) as n FROM appointments a
-       JOIN patients p ON p.id = a.patient_id
-       WHERE substr(a.start_time, 1, 10) = ? AND a.kind = 'patient'
-         AND a.status NOT IN ('cancelled', 'no_show')
-         AND EXISTS (
-           SELECT 1 FROM appointments c
-           WHERE c.patient_id = p.id AND c.status = 'completed'
-             AND substr(c.start_time, 1, 10) < ?
-         )`,
-      [today, today], { n: 0 },
+      `SELECT COUNT(DISTINCT p.id) as n FROM patients p
+       WHERE (EXISTS (
+         SELECT 1 FROM appointments a
+         WHERE a.patient_id = p.id AND substr(a.start_time, 1, 10) = ?
+           AND a.kind = 'patient' AND a.status NOT IN ('cancelled', 'no_show')
+       ) OR date(p.created_at, ?) = ?)
+       AND EXISTS (
+         SELECT 1 FROM appointments c
+         WHERE c.patient_id = p.id AND c.status = 'completed'
+           AND substr(c.start_time, 1, 10) < ?
+       )`,
+      [today, tzModifier, today, today], { n: 0 },
     ),
     // Patients registered in the last day. The panel that shows them reads
     // this alongside today's visits, so someone added at the front desk shows

@@ -130,6 +130,12 @@ describe("GET /api/dashboard/summary", () => {
     const clinicDay = new Date();
     clinicDay.setUTCDate(clinicDay.getUTCDate() - 45);
     const day = clinicDay.toISOString().slice(0, 10);
+    // Registered 45 days ago too, so the registration itself is not a visit
+    // today: only the two appointments below may be counted.
+    await ctx.db
+      .prepare("UPDATE patients SET created_at = ? WHERE id = ?")
+      .bind(`${day} 08:00:00`, pid)
+      .run();
     await seedAppointment({ patient_id: pid, start_time: `${day}T09:00:00`, end_time: `${day}T09:30:00` });
     await seedAppointment({ patient_id: pid, start_time: `${day}T11:00:00`, end_time: `${day}T11:30:00` });
 
@@ -188,6 +194,53 @@ describe("GET /api/dashboard/summary", () => {
     expect(data.total_visits).toBe(2);
     expect(data.new_patients_today).toBe(1);
     expect(data.returning_patients_today).toBe(1);
+  });
+
+  it("counts a patient registered today as a visit, without double counting their booking", async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    // Registering a patient at the front desk is a visit even before the chair
+    // is booked — that was the bug: the card stayed at zero after a new patient.
+    const pid = await seedPatient({ first_name: "Walk", last_name: "In" });
+
+    const registered = await app.request("/api/dashboard/summary", undefined, { DB: ctx.db });
+    const first = (await registered.json()) as {
+      total_visits: number;
+      new_patients_today: number;
+      returning_patients_today: number;
+    };
+    expect(first.total_visits).toBe(1);
+    expect(first.new_patients_today).toBe(1);
+    expect(first.returning_patients_today).toBe(0);
+
+    // Booking that same patient later in the day keeps the day at one visit.
+    await seedAppointment({ patient_id: pid, start_time: `${today}T10:00:00`, end_time: `${today}T10:30:00` });
+    const booked = await app.request("/api/dashboard/summary", undefined, { DB: ctx.db });
+    const second = (await booked.json()) as { total_visits: number; new_patients_today: number };
+    expect(second.total_visits).toBe(1);
+    expect(second.new_patients_today).toBe(1);
+  });
+
+  it("reads registrations on the clinic's day, not UTC's", async () => {
+    // 22:30 UTC on the 24th is 04:30 on the 25th in Dhaka (UTC+6): a patient
+    // registered then belongs to the clinic's 25th, which is the day we ask for.
+    const clinicDay = new Date();
+    clinicDay.setUTCDate(clinicDay.getUTCDate() - 10);
+    const day = clinicDay.toISOString().slice(0, 10);
+    await ctx.db
+      .prepare("INSERT INTO patients (first_name, last_name, created_at) VALUES ('Late', 'Night', ?)")
+      .bind(`${day} 22:30:00`)
+      .run();
+    const nextDay = new Date(`${day}T00:00:00Z`);
+    nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+    const tomorrow = nextDay.toISOString().slice(0, 10);
+
+    const utc = await app.request(`/api/dashboard/summary?today=${tomorrow}&tz=0`, undefined, { DB: ctx.db });
+    expect(((await utc.json()) as { total_visits: number }).total_visits).toBe(0);
+
+    const dhaka = await app.request(`/api/dashboard/summary?today=${tomorrow}&tz=360`, undefined, { DB: ctx.db });
+    const data = (await dhaka.json()) as { total_visits: number; new_patients_today: number };
+    expect(data.total_visits).toBe(1);
+    expect(data.new_patients_today).toBe(1);
   });
 
   it("reports no patients in the chair on a fresh practice", async () => {

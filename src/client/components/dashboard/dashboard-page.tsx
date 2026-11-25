@@ -89,9 +89,12 @@ export function DashboardPage({
 
   const loadSummary = useCallback(async () => {
     try {
-      // The server's clock is UTC; send the clinic's own calendar day so a
-      // 9am appointment in UTC+6 is not counted against yesterday.
-      const res = await api<DashboardSummary>("GET", `/api/dashboard/summary?today=${toIsoDate(new Date())}`);
+      // The server's clock is UTC; send the clinic's own calendar day (and its
+      // UTC offset, so a patient registered at 1am counts for today) so a 9am
+      // appointment in UTC+6 is not counted against yesterday.
+      const now = new Date();
+      const tz = -now.getTimezoneOffset();
+      const res = await api<DashboardSummary>("GET", `/api/dashboard/summary?today=${toIsoDate(now)}&tz=${tz}`);
       setSummary(res);
     } catch (err) {
       app.setError((err as Error).message);
