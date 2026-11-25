@@ -15,6 +15,7 @@ import { useApp } from "@/context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { deviceSyncEnabled } from "@/lib/server-config";
 import { cn } from "@/lib/utils";
 
 type Mode = "choose" | "signup" | "signin" | "reset" | "confirm";
@@ -267,8 +268,9 @@ export function AccountStep({
         </div>
         <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
           <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          Your practice data is stored in your Supabase project with row-level security:
-          only your account can read or change it.
+          {deviceSyncEnabled()
+            ? "Your practice data is stored in your Supabase project with row-level security: only your account can read or change it."
+            : "Your practice's records are isolated on this clinic's server: only accounts for this practice can read or change them."}
         </p>
       </form>
     );
