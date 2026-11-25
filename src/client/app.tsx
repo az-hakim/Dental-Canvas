@@ -50,7 +50,6 @@ import { AuthGate } from "./components/account/auth-gate";
 import { authRequired } from "./lib/server-config";
 
 export function App() {
-  const state = useAppState();
   const auth = useAuth();
   const { path, route, navigate } = useRouter();
   const [searchOpen, setSearchOpen] = useState(false);
@@ -61,6 +60,12 @@ export function App() {
   // requirement comes from the deployment itself (`GET /api/config`).
   const signedIn = auth.status === "signed-in";
   const needsSignIn = authRequired() && !signedIn;
+
+  // Practice data is tenant-scoped on the server, so the shell (and its
+  // once-a-day jobs) must not touch the API before there is a session: those
+  // calls would all be answered 401 and log errors behind the sign-in screen.
+  const practiceDataEnabled = !authRequired() || signedIn;
+  const state = useAppState(practiceDataEnabled);
 
   // Fresh browser/PWA install: offer the optional account once. Desktop gets
   // the same offer as the final setup-wizard step, so it is excluded here.
@@ -133,16 +138,19 @@ export function App() {
 
   // Once-per-day stock scan — refreshes low-stock/expiry alerts and the
   // dashboard notification panel (serverless: the timer lives in the browser).
-  useDailyInventoryScan();
+  useDailyInventoryScan(practiceDataEnabled);
 
   // Once-per-day worklist digest email (reminders/recalls/installments) to
   // the clinic inbox — same serverless pattern, scheduled in Settings → Email.
-  useDailyDigest(true);
+  useDailyDigest(practiceDataEnabled);
 
   // Appointment reminders: toast + native OS notification N minutes before
   // each of today's appointments (Settings → Notifications). Timers re-arm
   // whenever the reminder settings change.
-  useAppointmentReminders(state.settings.reminders_enabled, state.settings.reminder_minutes);
+  useAppointmentReminders(
+    practiceDataEnabled && state.settings.reminders_enabled,
+    state.settings.reminder_minutes,
+  );
 
   // Chairside timer: a native alert at zero even when the dashboard is not on
   // screen (the timer card itself only shows a toast while mounted).
@@ -195,15 +203,13 @@ export function App() {
   }, []);
   useEffect(() => { reportLocation(window.location.pathname + window.location.search); }, [path]);
 
-  // After signing in (or switching accounts), the shell's lookups were loaded
-  // — or rejected with 401 — before a session existed. Reload them and clear
-  // the transient auth error.
+  // The shell's data load starts when a session appears (useAppState's
+  // `enabled`), so signing in or switching accounts only needs to drop an
+  // error left over from the previous session.
   useEffect(() => {
     if (!signedIn) return;
     state.setError(null);
-    void state.refreshLookups().catch(() => undefined);
-    void state.refreshSidePanels().catch(() => undefined);
-  }, [signedIn, state.refreshLookups, state.refreshSidePanels, state.setError]);
+  }, [signedIn, state.setError]);
 
   // Full-screen paper routes (prescription/invoice print views) render without
   // nav chrome, like a document viewer. The check-in kiosk is likewise

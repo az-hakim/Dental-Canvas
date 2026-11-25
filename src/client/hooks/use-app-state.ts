@@ -129,7 +129,14 @@ function parseProfile(raw: Record<string, string>): ProfileSettings {
   return out;
 }
 
-export function useAppState() {
+/**
+ * `enabled` is false while a hosted deployment is still showing the sign-in
+ * gate. Practice data is tenant-scoped on the server, so nothing here may be
+ * requested before a session exists: every one of those calls would be answered
+ * 401 and fill the sign-in screen's console with errors. Once the user signs in
+ * the flag flips and the shell loads normally.
+ */
+export function useAppState(enabled = true) {
   const [operatories, setOperatories] = useState<Operatory[]>([]);
   const [practitioners, setPractitioners] = useState<Practitioner[]>([]);
   const [treatmentTypes, setTreatmentTypes] = useState<TreatmentType[]>([]);
@@ -211,20 +218,27 @@ export function useAppState() {
     setAppointmentsToMake(m.to_make);
   }, []);
 
-  // Initial load.
+  // Initial load — and the reload once a session appears.
   useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
     (async () => {
       try {
         setLoading(true);
         await refreshLookups();
         await refreshSidePanels();
+        if (cancelled) return;
+        setError(null);
       } catch (err) {
-        setError((err as Error).message);
+        if (!cancelled) setError((err as Error).message);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     })();
-  }, [refreshLookups, refreshSidePanels]);
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, refreshLookups, refreshSidePanels]);
 
   const createAppointment = useCallback(async (data: NewAppointment) => {
     const res = await api<{ appointment: Appointment }>("POST", "/api/appointments", data);

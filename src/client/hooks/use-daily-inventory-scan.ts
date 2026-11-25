@@ -18,8 +18,14 @@ import { api } from "../api";
 
 const LAST_SCAN_KEY = "dental-canvas:last-inventory-scan";
 
-export function useDailyInventoryScan() {
+/**
+ * `enabled` false means no session yet (hosted sign-in gate): the scan is a
+ * tenant API call, so it must wait. The stored date is only written after a
+ * successful scan, so signing in later still runs today's once-per-day pass.
+ */
+export function useDailyInventoryScan(enabled = true) {
   useEffect(() => {
+    if (!enabled) return;
     const today = new Date().toISOString().slice(0, 10);
     try {
       if (window.localStorage.getItem(LAST_SCAN_KEY) === today) return;
@@ -35,5 +41,5 @@ export function useDailyInventoryScan() {
         // Let the dashboard alert panel and any open Inventory page refresh.
         window.dispatchEvent(new Event("dental-canvas:inventory-scan"));
       });
-  }, []);
+  }, [enabled]);
 }
