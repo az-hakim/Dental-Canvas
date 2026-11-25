@@ -1,6 +1,7 @@
 import { AlertTriangle, CheckCircle2, CloudOff, Loader2, RefreshCw } from "lucide-react";
 import { useAuth } from "@/auth";
 import { useSyncStatus } from "@/hooks/use-sync-status";
+import { deviceSyncEnabled } from "@/lib/server-config";
 import { cn } from "@/lib/utils";
 import { syncStatusText } from "./sync-status";
 
@@ -17,6 +18,9 @@ export function SyncIndicator({ compact = false, onOpenSettings }: { compact?: b
   const status = useSyncStatus();
 
   if (!auth.cloudAvailable || !auth.user) return null;
+  // Hosted deployments keep data on the server; there is no device sync state
+  // to show (see deviceSyncEnabled).
+  if (!deviceSyncEnabled()) return null;
 
   const phase = status.phase;
   const Icon =

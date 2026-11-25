@@ -11,12 +11,12 @@ import {
 import { useAuth } from "@/auth";
 import { useSyncOptions } from "@/hooks/use-sync-options";
 import { useSyncStatus } from "@/hooks/use-sync-status";
+import { deviceSyncEnabled } from "@/lib/server-config";
 import {
   SYNC_INTERVAL_CHOICES,
   writeSyncOptions,
 } from "@/lib/sync/options";
-import { SYNC_TABLES } from "../../../shared/sync-schema";
-import { SYNC_CATEGORIES } from "../../../shared/sync-categories";
+import { SYNC_TABLES } from "../../../shared/sync-schema";import { SYNC_CATEGORIES } from "../../../shared/sync-categories";
 import { SyncStatusBadge } from "@/components/account/sync-status";
 import { toast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
@@ -41,6 +41,20 @@ export function SyncTab() {
   const options = useSyncOptions();
   const [busy, setBusy] = useState(false);
 
+  async function syncNow() {
+    setBusy(true);
+    try {
+      const next = await auth.syncNow();
+      if (!next) return;
+      if (next.phase === "error") toast.error(next.error ?? "Sync failed — it will retry.");
+      else toast.success("Sync finished");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const syncing = status.phase === "syncing";
+
   if (!auth.cloudAvailable) {
     return (
       <Card>
@@ -64,19 +78,30 @@ export function SyncTab() {
     );
   }
 
-  async function syncNow() {
-    setBusy(true);
-    try {
-      const next = await auth.syncNow();
-      if (!next) return;
-      if (next.phase === "error") toast.error(next.error ?? "Sync failed — it will retry.");
-      else toast.success("Sync finished");
-    } finally {
-      setBusy(false);
-    }
+  // Hosted deployment: the clinic's records live in the server database and
+  // every device reads them from there, so there is no device copy to sync.
+  if (!deviceSyncEnabled()) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <ShieldCheck className="h-4 w-4" /> Stored on your clinic's server
+          </CardTitle>
+          <p className="text-sm text-muted-foreground">
+            This deployment keeps every patient record in the practice database on the
+            server, available to each device as soon as you sign in. There is no separate
+            copy on this device to sync.
+          </p>
+        </CardHeader>
+        <CardContent>
+          <p className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+            The desktop and offline builds keep records on the device and sync them to
+            your own Supabase project.
+          </p>
+        </CardContent>
+      </Card>
+    );
   }
-
-  const syncing = status.phase === "syncing";
 
   return (
     <div className="space-y-4">

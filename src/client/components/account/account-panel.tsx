@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/auth";
 import { useSyncStatus } from "@/hooks/use-sync-status";
+import { deviceSyncEnabled } from "@/lib/server-config";
 import { httpLocalSyncApi } from "@/lib/sync/local-api";
 import { toast } from "@/components/ui/toast";
 import { ServerConnectionCard } from "./server-connection-card";
@@ -37,6 +38,7 @@ import { SyncStatusBadge } from "./sync-status";
 export function AccountPanel() {
   const auth = useAuth();
   const status = useSyncStatus();
+  const deviceSync = deviceSyncEnabled();
   const [form, setForm] = useState<"signup" | "signin" | null>(null);
   const [signOutRemoveOpen, setSignOutRemoveOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -229,29 +231,33 @@ export function AccountPanel() {
               <p className="text-xs uppercase tracking-wide text-muted-foreground">Email</p>
               <p className="truncate font-medium">{auth.user.email ?? "—"}</p>
             </div>
-            <div>
-              <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                Last sync
-              </p>
-              <p className="font-medium">
-                {status.lastSyncAt
-                  ? new Date(status.lastSyncAt).toLocaleString()
-                  : "Not yet synced on this device"}
-              </p>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <SyncStatusBadge status={status} />
-            {status.pending > 0 && (
-              <span className="text-xs text-muted-foreground">
-                {status.pending} {status.pending === 1 ? "change" : "changes"} waiting to
-                upload
-              </span>
+            {deviceSync && (
+              <div>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Last sync
+                </p>
+                <p className="font-medium">
+                  {status.lastSyncAt
+                    ? new Date(status.lastSyncAt).toLocaleString()
+                    : "Not yet synced on this device"}
+                </p>
+              </div>
             )}
           </div>
 
-          {status.phase === "error" && status.error && (
+          {deviceSync && (
+            <div className="flex flex-wrap items-center gap-2">
+              <SyncStatusBadge status={status} />
+              {status.pending > 0 && (
+                <span className="text-xs text-muted-foreground">
+                  {status.pending} {status.pending === 1 ? "change" : "changes"} waiting to
+                  upload
+                </span>
+              )}
+            </div>
+          )}
+
+          {deviceSync && status.phase === "error" && status.error && (
             <p
               role="alert"
               className="flex items-start gap-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800 dark:border-rose-800 dark:bg-rose-950/60 dark:text-rose-200"
@@ -271,15 +277,17 @@ export function AccountPanel() {
           )}
 
           <div className="flex flex-wrap gap-2">
-            <Button
-              onClick={() => void syncNow()}
-              disabled={busy || status.phase === "syncing"}
-            >
-              <RefreshCw
-                className={`h-4 w-4 ${status.phase === "syncing" ? "animate-spin" : ""}`}
-              />
-              Sync now
-            </Button>
+            {deviceSync && (
+              <Button
+                onClick={() => void syncNow()}
+                disabled={busy || status.phase === "syncing"}
+              >
+                <RefreshCw
+                  className={`h-4 w-4 ${status.phase === "syncing" ? "animate-spin" : ""}`}
+                />
+                Sync now
+              </Button>
+            )}
             <Button variant="outline" onClick={() => void signOut()} disabled={busy}>
               <LogOut className="h-4 w-4" /> Sign out
             </Button>

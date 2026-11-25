@@ -31,6 +31,7 @@ import {
   type AccountMode,
 } from "./lib/account-mode";
 import { readSyncOptions } from "./lib/sync/options";
+import { deviceSyncEnabled } from "./lib/server-config";
 import { useSyncOptions } from "./hooks/use-sync-options";
 import { onDataChanged } from "./lib/data-change-signal";
 import { httpLocalSyncApi } from "./lib/sync/local-api";
@@ -125,6 +126,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const startEngine = useCallback((nextUser: User) => {
     if (!client) return;
+    // Hosted deployment: the clinic's data lives in the server database and
+    // every request carries the session token (see lib/api.ts), so this device
+    // has nothing to sync. Starting the engine there only polls `/api/sync/*`
+    // without a token and paints a "Sync problem" the doctor cannot fix.
+    if (!deviceSyncEnabled()) return;
     if (engineRef.current && engineUserIdRef.current === nextUser.id) return;
     if (engineRef.current) {
       // Another account signed in without the explicit sign-out flow. Stop the

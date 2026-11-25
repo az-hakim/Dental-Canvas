@@ -39,6 +39,20 @@ export function authRequired(): boolean {
   return serverConfig().authRequired;
 }
 
+/**
+ * True when this app owns a local store that the device sync engine can sync
+ * to the cloud.
+ *
+ * A hosted (multi-tenant) deployment keeps every record in the server's
+ * database for the signed-in clinic, and all reads/writes already go through
+ * `api()` with the session token. There is no device copy to sync, so the
+ * engine must not start there: its only effect is polling the local
+ * `/api/sync/*` routes, which the tenant middleware answers with 401.
+ */
+export function deviceSyncEnabled(): boolean {
+  return !authRequired();
+}
+
 /** Fetch the deployment config once, before the app mounts. */
 export async function loadServerConfig(): Promise<ServerConfig> {
   const base = apiBaseUrl();
