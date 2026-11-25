@@ -34,6 +34,16 @@ See [Release process](docs/release-process.md) for how releases are cut.
   Release versions are also checked across `package.json`, `Cargo.toml` and
   `Cargo.lock` on every push: a stale lock made a freshly installed build report
   the old version and reinstall the same update forever.
+- **Bring the old patient list over in one go** — Patients → Import reads a
+  CSV exported from another system (Excel, Google Sheets, Dentally, Open
+  Dental), recognises the usual column names, and shows exactly what it will do
+  before writing anything: rows that are new, people already on file, rows it
+  cannot read, and the reason for each. Duplicates — same phone number, or same
+  name and birth date — are skipped by default, so importing the same file
+  twice adds nobody.
+- **Print the day sheet** — Agenda → Day sheet prints one page of the day in
+  time order: phone numbers, treatment, provider, room, status and any medical
+  alert, for the front desk to keep beside the chair when the screen is busy.
 - **One backup story** — the Google Drive mirror is gone. A web deployment
   already keeps the practice in its own database, so Settings → Backup now
   offers exactly one set of tools: portable export/import, the automatic

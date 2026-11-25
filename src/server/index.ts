@@ -29,6 +29,16 @@ import {
 } from "./seed";
 import { reindexSearchIndex, searchAll } from "./search";
 import {
+  MAX_PATIENT_IMPORT_BYTES,
+  MAX_IMPORT_ROWS,
+  PREVIEW_ROWS,
+  candidatesFrom,
+  detectColumns,
+  parseCsv,
+  planImport,
+  type ExistingPatient,
+} from "./patient-import";
+import {
   getInventorySettings,
   INVENTORY_CATEGORIES,
   runInventoryScan,
@@ -927,6 +937,117 @@ app.delete("/api/patients/:id", async (c) => {
   const r = await run("DELETE FROM patients WHERE id = ?", [id]);
   if (!r.changes) return c.json({ error: "Not found" }, 404);
   return c.json({ ok: true });
+});
+
+// ── Bulk patient import (Patients → Import CSV) ────────────────────
+//
+// Two steps: a preview that writes nothing and says which rows are new, which
+// are already on file and which cannot be read, then the import itself. The
+// parser and the matching rules live in ./patient-import, so they are tested
+// without a database.
+
+const PatientImportInput = z.object({
+  csv: z.string().min(1).max(MAX_PATIENT_IMPORT_BYTES, "That file is too large — import at most 2 MB at a time."),
+  skip_duplicates: z.boolean().optional(),
+});
+
+/** Shared by both routes so the preview cannot disagree with the import. */
+async function planPatientImport(csv: string) {
+  const table = parseCsv(csv);
+  if (!table.headers.length) {
+    return { error: "That file is empty. Save the patient list as CSV and try again." } as const;
+  }
+  const columns = detectColumns(table.headers);
+  if (columns.map.first_name === undefined && columns.map.last_name === undefined && columns.map.full_name === undefined) {
+    return {
+      error: "No name column found. The file needs “First name” and “Last name” columns, or a single “Name” column.",
+    } as const;
+  }
+  if (table.rows.length > MAX_IMPORT_ROWS) {
+    return { error: `That file has ${table.rows.length} rows. Import at most ${MAX_IMPORT_ROWS} at a time.` } as const;
+  }
+  const candidates = candidatesFrom(table, columns.map);
+  const existing = await query<ExistingPatient>(
+    "SELECT id, first_name, last_name, phone, date_of_birth FROM patients",
+  );
+  return { columns, rows: planImport(candidates, existing) } as const;
+}
+
+app.post("/api/patients/import/preview", async (c) => {
+  const parsed = await parseJson(c, PatientImportInput);
+  if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+  const plan = await planPatientImport(parsed.data.csv);
+  if ("error" in plan) return c.json({ error: plan.error }, 400);
+
+  const counts = { new: 0, duplicate: 0, invalid: 0 };
+  for (const row of plan.rows) counts[row.status]++;
+
+  return c.json({
+    columns: plan.columns.map,
+    labels: plan.columns.labels,
+    unmapped: plan.columns.unmapped,
+    total: plan.rows.length,
+    counts,
+    // The table shows the shape of the file, not 5,000 rows of DOM.
+    rows: plan.rows.slice(0, PREVIEW_ROWS).map((row) => ({
+      line: row.candidate.line,
+      status: row.status,
+      reason: row.reason,
+      duplicate_of: row.duplicate_of,
+      duplicate_of_line: row.duplicate_of_line,
+      warnings: row.candidate.warnings,
+      patient: {
+        first_name: row.candidate.first_name,
+        last_name: row.candidate.last_name,
+        phone: row.candidate.phone,
+        email: row.candidate.email,
+        date_of_birth: row.candidate.date_of_birth,
+      },
+    })),
+    truncated: plan.rows.length > PREVIEW_ROWS,
+  });
+});
+
+app.post("/api/patients/import", async (c) => {
+  const parsed = await parseJson(c, PatientImportInput);
+  if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+  const plan = await planPatientImport(parsed.data.csv);
+  if ("error" in plan) return c.json({ error: plan.error }, 400);
+
+  // Duplicates are skipped by default; the dialog offers "import anyway" for
+  // the file that really does hold two different people with one phone.
+  const skipDuplicates = parsed.data.skip_duplicates !== false;
+  const toCreate = plan.rows.filter(
+    (row) => row.status === "new" || (row.status === "duplicate" && !skipDuplicates),
+  );
+
+  const statements: SqlStatement[] = toCreate.map((row) => ({
+    sql: "INSERT INTO patients (first_name, last_name, date_of_birth, patient_gender, email, phone, address, medical_alerts, notes, referral_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    params: [
+      row.candidate.first_name,
+      row.candidate.last_name,
+      row.candidate.date_of_birth,
+      row.candidate.patient_gender,
+      row.candidate.email,
+      row.candidate.phone,
+      row.candidate.address,
+      row.candidate.medical_alerts,
+      row.candidate.notes,
+      row.candidate.referral_source,
+    ],
+  }));
+  // Chunked so a 5,000-row file is a handful of round trips rather than 5,000
+  // (and stays under the parameter limit of a single INSERT on D1).
+  for (let i = 0; i < statements.length; i += 200) {
+    await runBatch(statements.slice(i, i + 200));
+  }
+
+  return c.json({
+    created: toCreate.length,
+    duplicates: skipDuplicates ? plan.rows.filter((row) => row.status === "duplicate").length : 0,
+    invalid: plan.rows.filter((row) => row.status === "invalid").length,
+    total: plan.rows.length,
+  });
 });
 
 // ── Practice-defined prescription templates (Settings → Rx templates) ──

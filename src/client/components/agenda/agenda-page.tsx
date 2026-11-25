@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { UserPlus } from "lucide-react";
+import { Printer, UserPlus } from "lucide-react";
 import { useApp } from "@/context";
+import { api } from "@/api";
 import { Button } from "@/components/ui/button";
 import { PageShell } from "@/components/page-shell";
 import { toIsoDate } from "@/lib/utils";
@@ -10,6 +11,7 @@ import { DayGrid } from "./day-grid";
 import { AppointmentDialog } from "./appointment-dialog";
 import { AgendaSidePanel } from "./side-panel";
 import { RegisterAndBookDialog } from "./register-and-book-dialog";
+import { printDaySheet } from "./day-sheet";
 
 export function AgendaPage() {
   const app = useApp();
@@ -48,6 +50,25 @@ export function AgendaPage() {
     setDialogOpen(true);
   }
 
+  /**
+   * One page of the day for the front desk. Phone numbers and medical alerts
+   * come from the patient list, which the appointments join does not carry.
+   */
+  async function printDaySheetForDay() {
+    try {
+      const { patients } = await api<{ patients: Patient[] }>("GET", "/api/patients");
+      printDaySheet({
+        date,
+        appointments: app.appointments,
+        clinicName: app.profile?.clinic_name,
+        clinicPhone: app.profile?.doctor_phone,
+        patients,
+      });
+    } catch (err) {
+      app.setError((err as Error).message);
+    }
+  }
+
   function handleBooked(patient: Patient, _appointment: Appointment) {
     void _appointment;
     setJustBooked(patient);
@@ -59,6 +80,15 @@ export function AgendaPage() {
     <PageShell contentClassName="flex-col lg:flex-row">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <DayToolbar date={date} onChange={setDate} onCreate={() => openCreate()}>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-10 flex-1 justify-center rounded-full border-border/60 bg-card/85 shadow-sm backdrop-blur sm:flex-none"
+            onClick={() => void printDaySheetForDay()}
+            title="Print the day's schedule for the front desk"
+          >
+            <Printer className="h-4 w-4" /> Day sheet
+          </Button>
           <Button
             variant="outline"
             size="sm"

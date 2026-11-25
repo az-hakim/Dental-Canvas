@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronRight, Pencil, Plus, Search, UserPlus, Users } from "lucide-react";
+import { ChevronRight, Pencil, Plus, Search, Upload, UserPlus, Users } from "lucide-react";
 import { useApp } from "@/context";
 import { api } from "@/api";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import { formatDate, formatMoney } from "@/lib/utils";
 import { useDataRefresh } from "@/hooks/use-data-refresh";
 import type { Patient } from "@/types";
 import { PatientDialog } from "./patient-dialog";
+import { ImportPatientsDialog } from "./import-patients-dialog";
 
 /** Two initials on the row avatar — the same visual rhythm as the dashboard. */
 function initials(p: Patient): string {
@@ -29,6 +30,7 @@ export function PatientsList({ navigate }: { navigate: (to: string) => void }) {
   const [balances, setBalances] = useState<Record<string, number>>({});
   /** Patient being quick-edited from its row; null = registering a new one. */
   const [editing, setEditing] = useState<Patient | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -86,6 +88,17 @@ export function PatientsList({ navigate }: { navigate: (to: string) => void }) {
                 className="h-11 rounded-full border-border/60 bg-card/85 pl-11 pr-4 shadow-sm backdrop-blur focus-visible:ring-primary/40"
               />
             </div>
+            {/* Bringing a list over from the old system is the first thing a
+                new practice does, so it sits beside registration. */}
+            <Button
+              variant="outline"
+              className="h-11 rounded-full px-5"
+              onClick={() => setImportOpen(true)}
+              title="Import a patient list from a CSV file"
+            >
+              <Upload className="h-4 w-4" />
+              Import
+            </Button>
             <Button
               className="h-11 rounded-full px-5 shadow-lg shadow-primary/20"
               onClick={() => {
@@ -362,6 +375,12 @@ export function PatientsList({ navigate }: { navigate: (to: string) => void }) {
         }}
         onOpenPatient={(p) => navigate(`/patients/${p.id}`)}
         openPatientLabel="Open record"
+      />
+
+      <ImportPatientsDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        onImported={() => void load()}
       />
     </PageShell>
   );

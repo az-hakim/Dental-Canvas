@@ -6,8 +6,8 @@
 # @source roots in src/client/styles.css (they must stay src/ and
 # index.html) and look for stray files inside src/.
 #
-# source: main @ d7d67e1 (2026-11-24)
-# classes: 1649
+# source: main @ 3561688 (2026-11-26)
+# classes: 1656
 -bottom-10
 -bottom-6
 -bottom-9
@@ -82,6 +82,7 @@ bg-black/95
 bg-border
 bg-border/70
 bg-card
+bg-card/50
 bg-card/60
 bg-card/70
 bg-card/80
@@ -235,6 +236,7 @@ border-border/40
 border-border/50
 border-border/60
 border-border/70
+border-collapse
 border-dashed
 border-destructive/30
 border-emerald-100
@@ -942,6 +944,7 @@ hover:bg-pink-100
 hover:bg-primary/20
 hover:bg-primary/80
 hover:bg-primary/90
+hover:bg-primary/[0.03]
 hover:bg-primary/[0.04]
 hover:bg-primary/[0.05]
 hover:bg-primary/[0.07]
@@ -957,6 +960,7 @@ hover:border-muted-foreground/30
 hover:border-primary/15
 hover:border-primary/30
 hover:border-primary/40
+hover:border-primary/50
 hover:border-teal-500
 hover:no-underline
 hover:opacity-100
@@ -1025,6 +1029,7 @@ lg:w-80
 line-clamp-2
 line-through
 list-none
+lowercase
 max-h-20
 max-h-32
 max-h-56
@@ -1032,6 +1037,7 @@ max-h-64
 max-h-72
 max-h-[--radix-select-content-available-height]
 max-h-[40vh]
+max-h-[42vh]
 max-h-[50vh]
 max-h-[600px]
 max-h-[80vh]
@@ -1042,6 +1048,7 @@ max-h-[calc(100vh-2rem)]
 max-h-full
 max-h-none
 max-w-2xl
+max-w-3xl
 max-w-[220px]
 max-w-[240px]
 max-w-[calc(100vw-1.5rem)]
