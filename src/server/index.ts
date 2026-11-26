@@ -38,6 +38,7 @@ import {
   planImport,
   type ExistingPatient,
 } from "./patient-import";
+import { countPatientRows, mergePatients } from "./patient-merge";
 import {
   getInventorySettings,
   INVENTORY_CATEGORIES,
@@ -937,6 +938,39 @@ app.delete("/api/patients/:id", async (c) => {
   const r = await run("DELETE FROM patients WHERE id = ?", [id]);
   if (!r.changes) return c.json({ error: "Not found" }, 404);
   return c.json({ ok: true });
+});
+
+// ── Merging two records for the same person ────────────────────────
+//
+// Importing an old patient list lands the same person twice, and deleting one
+// record would cascade its appointments, invoices and notes away. A merge moves
+// that history onto the surviving record first (see ./patient-merge), then
+// removes the other. The preview exists so the doctor sees what will move
+// before anything does.
+
+const PatientMergeInput = z.object({
+  keep_id: z.number().int().positive(),
+  merge_id: z.number().int().positive(),
+});
+
+app.get("/api/patients/:id/merge-preview", async (c) => {
+  const id = intParam(c.req.param("id"));
+  const otherId = intParam(c.req.query("other_id"));
+  if (!id || !otherId) return c.json({ error: "Invalid ID" }, 400);
+  if (id === otherId) return c.json({ error: "Choose two different records to merge." }, 400);
+  const keep = await get("SELECT id, first_name, last_name FROM patients WHERE id = ?", [id]);
+  const other = await get("SELECT id, first_name, last_name FROM patients WHERE id = ?", [otherId]);
+  if (!keep || !other) return c.json({ error: "Patient not found" }, 404);
+  const [kept, counts] = await Promise.all([countPatientRows(id), countPatientRows(otherId)]);
+  return c.json({ keep, other, counts, kept });
+});
+
+app.post("/api/patients/merge", async (c) => {
+  const parsed = await parseJson(c, PatientMergeInput);
+  if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+  const result = await mergePatients(parsed.data.keep_id, parsed.data.merge_id);
+  if ("error" in result) return c.json({ error: result.error }, result.status);
+  return c.json(result);
 });
 
 // ── Bulk patient import (Patients → Import CSV) ────────────────────

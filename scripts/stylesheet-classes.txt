@@ -6,8 +6,8 @@
 # @source roots in src/client/styles.css (they must stay src/ and
 # index.html) and look for stray files inside src/.
 #
-# source: main @ 3561688 (2026-11-26)
-# classes: 1656
+# source: main @ 4b164f0 (2026-11-26)
+# classes: 1660
 -bottom-10
 -bottom-6
 -bottom-9
@@ -269,6 +269,7 @@ border-l
 border-l-transparent
 border-muted
 border-muted-foreground/30
+border-muted-foreground/50
 border-orange-100
 border-orange-200
 border-orange-300
@@ -1006,6 +1007,7 @@ left-1.5
 left-1/2
 left-2
 left-2.5
+left-3
 left-4
 left-[50%]
 lg:border-l
@@ -1161,6 +1163,7 @@ peer-disabled:cursor-not-allowed
 peer-disabled:opacity-70
 pl-11
 pl-8
+pl-9
 placeholder:text-muted-foreground
 pointer-events-auto
 pointer-events-none
@@ -1573,6 +1576,7 @@ top-[50%]
 touch-none
 tracking-[0.12em]
 tracking-[0.14em]
+tracking-[0.15em]
 tracking-[0.16em]
 tracking-[0.18em]
 tracking-[0.2em]

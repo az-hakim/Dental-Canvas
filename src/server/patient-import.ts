@@ -24,6 +24,12 @@ export const PREVIEW_ROWS = 200;
 export interface CsvTable {
   headers: string[];
   rows: string[][];
+  /**
+   * The physical line each row starts on, header being line 1. A cell may
+   * contain a line break, so `index + 2` is wrong the moment a file has one —
+   * and a wrong line number sends the user to the wrong record in their file.
+   */
+  rowLines: number[];
 }
 
 const DELIMITERS = [",", ";", "\t"] as const;
@@ -55,18 +61,43 @@ function sniffDelimiter(text: string): string {
   return best;
 }
 
+interface CsvRecord {
+  cells: string[];
+  line: number;
+}
+
 /**
  * Splits CSV text into records. Quotes are handled the RFC 4180 way: a field
  * may contain the delimiter, line breaks and doubled quotes.
+ *
+ * Every record carries the physical line it began on, counted through quoted
+ * line breaks and blank lines, so row numbers in the preview match the file.
  */
-function splitRecords(text: string, delimiter: string): string[][] {
-  const records: string[][] = [];
+function splitRecords(text: string, delimiter: string): CsvRecord[] {
+  const records: CsvRecord[] = [];
   let record: string[] = [];
   let field = "";
   let inQuotes = false;
+  let line = 1;
+  let recordLine = 1;
+  let started = false;
+
+  const endRecord = () => {
+    record.push(field);
+    records.push({ cells: record, line: recordLine });
+    record = [];
+    field = "";
+    started = false;
+  };
 
   for (let i = 0; i < text.length; i++) {
     const ch = text[i] as string;
+    // The record starts at its first real character, not at the newline that
+    // ended the previous one.
+    if (!started && ch !== "\n" && ch !== "\r") {
+      started = true;
+      recordLine = line;
+    }
     if (inQuotes) {
       if (ch === '"') {
         if (text[i + 1] === '"') {
@@ -76,6 +107,7 @@ function splitRecords(text: string, delimiter: string): string[][] {
           inQuotes = false;
         }
       } else {
+        if (ch === "\n") line++;
         field += ch;
       }
       continue;
@@ -92,17 +124,15 @@ function splitRecords(text: string, delimiter: string): string[][] {
     }
     if (ch === "\r") continue; // \r\n and a lone \r both end at the \n below
     if (ch === "\n") {
-      record.push(field);
-      records.push(record);
-      record = [];
-      field = "";
+      line++;
+      endRecord();
       continue;
     }
     field += ch;
   }
   if (field.length > 0 || record.length > 0) {
     record.push(field);
-    records.push(record);
+    records.push({ cells: record, line: recordLine });
   }
   return records;
 }
@@ -114,14 +144,15 @@ function splitRecords(text: string, delimiter: string): string[][] {
  */
 export function parseCsv(input: string): CsvTable {
   const text = input.replace(/^\uFEFF/, "");
-  if (!text.trim()) return { headers: [], rows: [] };
+  if (!text.trim()) return { headers: [], rows: [], rowLines: [] };
   const records = splitRecords(text, sniffDelimiter(text)).filter((record) =>
-    record.some((cell) => cell.trim() !== ""),
+    record.cells.some((cell) => cell.trim() !== ""),
   );
-  const headerRow = records.shift() ?? [];
+  const headerRow = records.shift();
   return {
-    headers: headerRow.map((header) => header.trim()),
-    rows: records,
+    headers: (headerRow?.cells ?? []).map((header) => header.trim()),
+    rows: records.map((record) => record.cells),
+    rowLines: records.map((record) => record.line),
   };
 }
 
@@ -340,6 +371,177 @@ function normalizeGender(raw: string | undefined): string | null {
   return "Other";
 }
 
+// ── Medical alerts ────────────────────────────────────────────────
+//
+// `patients.medical_alerts` is a comma-separated list of tags, and the rest of
+// the app reads an allergy as `allergy:<name>` (see the schema comment and the
+// prescription sheet's alert block). Another system's export holds prose
+// instead — "Penicillin, latex", "Allergic to penicillin", "NKA" — so copying
+// the cell through unchanged produced an alert that rendered as a sentence and
+// never matched the tag the clinical screens look for. This turns a cell into
+// the app's own format, and an unreadable word still keeps its meaning.
+
+/** A cell that only says "there is nothing to record". */
+const NO_ALERTS = new Set([
+  "none",
+  "nil",
+  "no",
+  "na",
+  "n a",
+  "nka",
+  "nkda",
+  "nka nkda",
+  "unknown",
+  "nothing",
+  "denies",
+  "denies allergies",
+  "no allergies",
+  "no allergy",
+  "no known allergies",
+  "no known allergy",
+  "no known drug allergies",
+  "no known medical alerts",
+  "no medical alerts",
+  "no significant history",
+]);
+
+/**
+ * Written without the word "allergy" but still an allergy: a drug family in an
+ * alerts column is a reaction, not a diagnosis. Matched against the tag words,
+ * so "penicillin (rash)" and "sulfa drugs" both count.
+ */
+const ALLERGENS = [
+  "penicillin",
+  "amoxicillin",
+  "ampicillin",
+  "cephalosporin",
+  "clindamycin",
+  "erythromycin",
+  "azithromycin",
+  "metronidazole",
+  "tetracycline",
+  "doxycycline",
+  "sulfa",
+  "sulfonamide",
+  "nsaid",
+  "ibuprofen",
+  "aspirin",
+  "paracetamol",
+  "acetaminophen",
+  "codeine",
+  "morphine",
+  "tramadol",
+  "opioid",
+  "lidocaine",
+  "articaine",
+  "mepivacaine",
+  "bupivacaine",
+  "anaesthetic",
+  "anesthetic",
+  "chlorhexidine",
+  "eugenol",
+  "iodine",
+  "latex",
+  "nickel",
+  "acrylate",
+  "methacrylate",
+  "peanut",
+  "nuts",
+  "tree nuts",
+  "shellfish",
+  "seafood",
+  "egg",
+  "milk",
+  "dairy",
+  "wheat",
+  "gluten",
+  "soy",
+  "sesame",
+];
+
+/** Lowercase, accent-free, hyphen-joined — the tag form the app already uses. */
+function tagSlug(value: string): string {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function plainWords(value: string): string {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+/** A header such as "Allergies" or "Drug allergy" makes every cell in it one. */
+export function isAllergyColumn(header: string): boolean {
+  return /\ballerg/.test(plainWords(header));
+}
+
+function looksLikeAllergen(value: string): boolean {
+  const slug = `-${tagSlug(value)}-`;
+  return ALLERGENS.some((allergen) => slug.includes(`-${allergen}-`) || slug.includes(`-${allergen}s-`));
+}
+
+/**
+ * Rewrites one alerts cell as comma-separated tags: `allergy:penicillin`,
+ * `heart-condition`, `diabetes`. Tags already in that form are kept (and
+ * lowercased), placeholders such as "NKA" and "none" become `null`, and
+ * repeated tags are dropped.
+ *
+ * `allAllergies` is true when the column itself is an allergies column, where
+ * "Penicillin" means an allergy rather than a condition.
+ */
+export function normalizeAlerts(raw: string | undefined, allAllergies = false): string | null {
+  const text = cleanText(raw);
+  if (!text) return null;
+
+  const tags: string[] = [];
+  const seen = new Set<string>();
+  const add = (tag: string) => {
+    if (!tag || seen.has(tag)) return;
+    seen.add(tag);
+    tags.push(tag);
+  };
+
+  for (const part of text.split(/[,;|•·\r\n]+/)) {
+    const value = part.replace(/^[-*\s]+/, "").replace(/\s+/g, " ").replace(/[.\s]+$/, "").trim();
+    if (!value) continue;
+    const words = plainWords(value);
+    if (!words || NO_ALERTS.has(words)) continue;
+
+    // Already tagged: "allergy: penicillin", "Condition: Asthma".
+    const tagged = /^([a-z][a-z0-9 _&-]*?)\s*:\s*(.+)$/i.exec(value);
+    if (tagged) {
+      const namespace = tagSlug(tagged[1] ?? "");
+      const name = tagSlug(tagged[2] ?? "");
+      // "Allergy:”, "Drug allergy:” and "Allergies:” all mean the same tag.
+      if (name) add(`${/allerg/.test(namespace) ? "allergy" : namespace}:${name}`);
+      continue;
+    }
+
+    // "Allergic to penicillin", "Reacts to latex", "Allergy - latex".
+    const stated =
+      /^(?:(?:drug\s+)?allerg(?:y|ies|ic)|reaction\s+to|reacts\s+to|sensitive\s+to|intolerant\s+to)\s*(?:(?:to|of)\s+|:\s*|-\s*)?/i.exec(
+        value,
+      );
+    if (stated) {
+      const name = tagSlug(value.slice(stated[0].length));
+      if (name) add(`allergy:${name}`);
+      continue;
+    }
+
+    add(allAllergies || looksLikeAllergen(value) ? `allergy:${tagSlug(value)}` : tagSlug(value));
+  }
+
+  return tags.length > 0 ? tags.join(",") : null;
+}
+
 // ── Rows ──────────────────────────────────────────────────────────
 
 export interface Candidate {
@@ -389,6 +591,9 @@ function cell(row: string[], index: number | undefined): string | undefined {
  * row still imports.
  */
 export function candidatesFrom(table: CsvTable, map: ColumnMap): Candidate[] {
+  const alertsHeader = map.medical_alerts === undefined ? "" : table.headers[map.medical_alerts] ?? "";
+  const alertsColumnIsAllergy = isAllergyColumn(alertsHeader);
+
   return table.rows.map((row, index) => {
     const warnings: string[] = [];
     let first_name = "";
@@ -426,7 +631,10 @@ export function candidatesFrom(table: CsvTable, map: ColumnMap): Candidate[] {
     }
 
     return {
-      line: index + 2,
+      // The physical line the row starts on: a quoted cell with a line break
+      // pushes every later row down, and the number is what the user searches
+      // for in their own file.
+      line: table.rowLines?.[index] ?? index + 2,
       first_name,
       last_name,
       date_of_birth,
@@ -434,7 +642,7 @@ export function candidatesFrom(table: CsvTable, map: ColumnMap): Candidate[] {
       email,
       phone: cleanPhone(cell(row, map.phone)),
       address: cleanText(cell(row, map.address)) || null,
-      medical_alerts: cleanText(cell(row, map.medical_alerts)) || null,
+      medical_alerts: normalizeAlerts(cell(row, map.medical_alerts), alertsColumnIsAllergy),
       notes: cleanText(cell(row, map.notes)) || null,
       referral_source: cleanText(cell(row, map.referral_source)) || null,
       error,

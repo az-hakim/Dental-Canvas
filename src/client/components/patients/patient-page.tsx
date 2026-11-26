@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Pencil, Trash2, UserRound } from "lucide-react";
+import { ArrowLeft, Combine, Pencil, Trash2, UserRound } from "lucide-react";
 import { api } from "@/api";
 import { useApp } from "@/context";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,7 @@ import { ConsentsTab } from "./consents-tab";
 import { PrescriptionsTab } from "@/components/prescriptions/prescriptions-tab";
 import { ImagesGallery } from "./images-gallery";
 import { PatientDialog } from "./patient-dialog";
+import { MergePatientDialog } from "./merge-patient-dialog";
 
 interface Props {
   id: number;
@@ -28,6 +29,7 @@ export function PatientPage({ id, navigate }: Props) {
   const [patient, setPatient] = useState<Patient | null>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
+  const [merging, setMerging] = useState(false);
   // Keep a ref to the context so the fetch effect doesn't depend on `app` —
   // the context object can change identity across renders, and this effect
   // must not re-run (it would remount the page and reset tab/dialog state).
@@ -141,6 +143,16 @@ export function PatientPage({ id, navigate }: Props) {
               <Pencil className="h-4 w-4" />
               Edit
             </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setMerging(true)}
+              className="h-10 flex-1 rounded-full sm:h-9 sm:flex-none"
+              title="Same person entered twice? Move their history into one record."
+            >
+              <Combine className="h-4 w-4" />
+              Merge
+            </Button>
             <Button variant="ghost" size="sm" onClick={deletePatient} className="h-10 flex-1 rounded-full text-destructive hover:bg-destructive/10 hover:text-destructive sm:h-9 sm:flex-none">
               <Trash2 className="h-4 w-4" />
               Delete
@@ -206,6 +218,18 @@ export function PatientPage({ id, navigate }: Props) {
         onOpenChange={setEditing}
         patient={patient}
         onSaved={(p) => setPatient(p)}
+      />
+
+      <MergePatientDialog
+        open={merging}
+        onOpenChange={setMerging}
+        patient={patient}
+        onMerged={(survivor) => {
+          // Keeping the other record means this page now shows a patient that
+          // no longer exists: follow the survivor instead.
+          if (survivor.id === patient.id) setPatient(survivor);
+          else navigate(`/patients/${survivor.id}`);
+        }}
       />
     </PageShell>
   );

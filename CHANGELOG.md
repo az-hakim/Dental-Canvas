@@ -41,6 +41,21 @@ See [Release process](docs/release-process.md) for how releases are cut.
   cannot read, and the reason for each. Duplicates — same phone number, or same
   name and birth date — are skipped by default, so importing the same file
   twice adds nobody.
+- **Alerts arrive as the tags the app reads** — an alerts cell that says
+  "Penicillin, latex" or "Allergic to penicillin" is stored as
+  `allergy:penicillin,allergy:latex` instead of a sentence, so the patient
+  banner, the day sheet and the prescription alert block pick it up; a condition
+  stays a condition ("Asthma" → `asthma`), and "NKA"/"none" is left empty.
+  Preview row numbers also count the real line in the file now, so a note with
+  a line break in it no longer shifts every number after it.
+- **Merge two records for one person** — an imported list (or a quick
+  registration made while the patient waited) can leave the same patient on file
+  twice, and deleting the spare would take its appointments, invoices and notes
+  with it. Patient → Merge picks the other record, shows exactly what will move
+  (`3 appointments, 1 invoice, 2 clinical notes`), then moves them onto the
+  record you keep and removes the other. The survivor's own details win, its
+  blanks are filled from the other record, and the two medical-alert lists are
+  united — so an allergy recorded on only one of them survives.
 - **Print the day sheet** — Agenda → Day sheet prints one page of the day in
   time order: phone numbers, treatment, provider, room, status and any medical
   alert, for the front desk to keep beside the chair when the screen is busy.

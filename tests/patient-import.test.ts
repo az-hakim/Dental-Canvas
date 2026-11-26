@@ -3,6 +3,7 @@ import { createTestContext, freshApp, jsonRequest, type TestContext } from "./he
 import {
   candidatesFrom,
   detectColumns,
+  normalizeAlerts,
   normalizeImportDate,
   parseCsv,
   phoneDigits,
@@ -40,7 +41,17 @@ describe("CSV parsing", () => {
   });
 
   it("returns nothing for an empty file", () => {
-    expect(parseCsv("   \n  ")).toEqual({ headers: [], rows: [] });
+    expect(parseCsv("   \n  ")).toEqual({ headers: [], rows: [], rowLines: [] });
+  });
+
+  it("counts the physical line each row starts on, through quoted line breaks", () => {
+    const table = parseCsv('Name,Notes\n"Smith, John","first\nsecond"\nJane,Cooper\n');
+    expect(table.rowLines).toEqual([2, 4]);
+  });
+
+  it("counts blank lines the same way the editor does", () => {
+    const table = parseCsv("First name,Last name\n\nJane,Cooper\n");
+    expect(table.rowLines).toEqual([3]);
   });
 });
 
@@ -126,6 +137,45 @@ describe("dates, phones and names", () => {
     const table = parseCsv("First name,Last name,Phone\n,,555-0100\n");
     const [row] = candidatesFrom(table, detectColumns(table.headers).map);
     expect(row?.error).toBe("no name in this row");
+  });
+});
+
+// ── Medical alerts ────────────────────────────────────────────────
+
+describe("medical alerts", () => {
+  it("tags every entry of an allergies column", () => {
+    expect(normalizeAlerts("Penicillin, latex", true)).toBe("allergy:penicillin,allergy:latex");
+  });
+
+  it("reads the ways a file writes down an allergy", () => {
+    expect(normalizeAlerts("Allergic to penicillin (rash)")).toBe("allergy:penicillin-rash");
+    expect(normalizeAlerts("allergy: penicillin; Sulfa drugs")).toBe("allergy:penicillin,allergy:sulfa-drugs");
+    expect(normalizeAlerts("Drug allergy: Ibuprofen; reacts to latex")).toBe(
+      "allergy:ibuprofen,allergy:latex",
+    );
+    expect(normalizeAlerts("Penicillin\nLatex", true)).toBe("allergy:penicillin,allergy:latex");
+  });
+
+  it("leaves a condition as a condition", () => {
+    expect(normalizeAlerts("Asthma, heart-condition")).toBe("asthma,heart-condition");
+    expect(normalizeAlerts("Aspirin, Diabetes")).toBe("allergy:aspirin,diabetes");
+  });
+
+  it("drops placeholders and repeats", () => {
+    expect(normalizeAlerts("NKA")).toBeNull();
+    expect(normalizeAlerts("No known allergies")).toBeNull();
+    expect(normalizeAlerts("   ")).toBeNull();
+    expect(normalizeAlerts("Penicillin, penicillin", true)).toBe("allergy:penicillin");
+  });
+
+  it("tags a bare drug name in an alerts column, not one elsewhere", () => {
+    const alerts = parseCsv("First name,Last name,Allergies\nJane,Cooper,Penicillin\n");
+    const [allergy] = candidatesFrom(alerts, detectColumns(alerts.headers).map);
+    expect(allergy?.medical_alerts).toBe("allergy:penicillin");
+
+    const conditions = parseCsv("First name,Last name,Medical conditions\nJane,Cooper,Diabetes\n");
+    const [condition] = candidatesFrom(conditions, detectColumns(conditions.headers).map);
+    expect(condition?.medical_alerts).toBe("diabetes");
   });
 });
 
@@ -240,6 +290,22 @@ describe("POST /api/patients/import/preview", () => {
     const list = await app.request("/api/patients?q=Quarrington", undefined, { DB: ctx.db });
     const { patients } = (await list.json()) as { patients: unknown[] };
     expect(patients).toHaveLength(0);
+  });
+
+  it("keeps line numbers honest when a cell wraps, and stores alerts as tags", async () => {
+    const csv = [
+      "First name,Last name,Allergies,Notes",
+      'Nadia,Ferro,"Penicillin, latex","Moved\nfrom Leeds"',
+      "Owen,Priest,Diabetes,,",
+    ].join("\n");
+    const preview = await post("/api/patients/import/preview", { csv });
+    const rows = preview.body.rows as { line: number }[];
+    expect(rows.map((row) => row.line)).toEqual([2, 4]);
+
+    await post("/api/patients/import", { csv });
+    const list = await app.request("/api/patients?q=Ferro", undefined, { DB: ctx.db });
+    const { patients } = (await list.json()) as { patients: { medical_alerts: string }[] };
+    expect(patients[0]?.medical_alerts).toBe("allergy:penicillin,allergy:latex");
   });
 
   it("refuses a file with no name column", async () => {
