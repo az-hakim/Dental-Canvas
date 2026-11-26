@@ -6,8 +6,8 @@
 # @source roots in src/client/styles.css (they must stay src/ and
 # index.html) and look for stray files inside src/.
 #
-# source: main @ 4b164f0 (2026-11-26)
-# classes: 1660
+# source: main @ c780ae7 (2026-11-26)
+# classes: 1661
 -bottom-10
 -bottom-6
 -bottom-9
@@ -285,6 +285,7 @@ border-primary
 border-primary/15
 border-primary/25
 border-primary/30
+border-primary/40
 border-primary/60
 border-r
 border-rose-100

@@ -10,6 +10,16 @@
 
 const STORAGE_KEY = "dental-canvas:api-base";
 
+/**
+ * The override saved on this computer, or null when there is none.
+ *
+ * An empty string is a real choice — "use this computer's own database" — and
+ * is different from having saved nothing, which falls back to the URL baked in
+ * at build time. The installers ship with that URL set (see
+ * .github/workflows/build-packages.yml), so clearing the key would leave an
+ * existing install pointed at the hosted practice anyway.
+ */
+
 function env(name: string): string | undefined {
   const value = (import.meta as unknown as { env?: Record<string, string | undefined> }).env?.[name];
   return value?.trim() || undefined;
@@ -19,7 +29,10 @@ function normalize(url: string): string {
   return url.trim().replace(/\/+$/, "");
 }
 
-/** Runtime override (desktop → hosted server), else the build-time value. */
+/**
+ * The saved override when there is one — a server URL, or "" for this
+ * computer's own database — else the URL the build was compiled with.
+ */
 export function apiBaseUrl(): string {
   try {
     const stored = window.localStorage.getItem(STORAGE_KEY);
@@ -30,11 +43,15 @@ export function apiBaseUrl(): string {
   return normalize(env("VITE_API_BASE_URL") ?? "");
 }
 
-/** Save (or clear, with null) the server this app talks to. Needs a reload. */
+/**
+ * Save the server this app talks to — `null` forgets the override (the build's
+ * URL applies again), `""` means "this computer's own database". Needs a
+ * reload.
+ */
 export function setApiBaseUrl(url: string | null): void {
   try {
-    if (url && normalize(url)) window.localStorage.setItem(STORAGE_KEY, normalize(url));
-    else window.localStorage.removeItem(STORAGE_KEY);
+    if (url === null) window.localStorage.removeItem(STORAGE_KEY);
+    else window.localStorage.setItem(STORAGE_KEY, normalize(url));
   } catch {
     /* nothing to do — the build-time value still applies */
   }

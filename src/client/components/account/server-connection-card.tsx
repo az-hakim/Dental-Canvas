@@ -77,7 +77,9 @@ export function ServerConnectionCard() {
             <Link2 className="h-4 w-4" /> {saved ? "Reconnecting…" : "Connect"}
           </Button>
           {current && (
-            <Button variant="outline" onClick={() => save(null)}>
+            // An empty saved value means "this device" explicitly: clearing the
+            // key instead would fall back to the installers' build-time URL.
+            <Button variant="outline" onClick={() => save("")}>
               Use this device
             </Button>
           )}

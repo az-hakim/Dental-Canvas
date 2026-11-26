@@ -46,8 +46,16 @@ See [Release process](docs/release-process.md) for how releases are cut.
   `allergy:penicillin,allergy:latex` instead of a sentence, so the patient
   banner, the day sheet and the prescription alert block pick it up; a condition
   stays a condition ("Asthma" → `asthma`), and "NKA"/"none" is left empty.
-  Preview row numbers also count the real line in the file now, so a note with
+  Preview row numbers also count the real line in the file now, so   a note with
   a line break in it no longer shifts every number after it.
+- **An updated desktop install can reach the records it already had** — the
+  installers now point at the hosted practice, which sent an existing install
+  to the sign-in gate while its own database sat untouched on the same disk.
+  The gate now checks for that database and, when it finds one, offers
+  **Open this computer's records**, which puts the app back on its own backend
+  with everything intact. “Use this device” in Settings → Account works against
+  the installers' built-in server URL too, instead of silently falling back to
+  it.
 - **Merge two records for one person** — an imported list (or a quick
   registration made while the patient waited) can leave the same patient on file
   twice, and deleting the spare would take its appointments, invoices and notes
