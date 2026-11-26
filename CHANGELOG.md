@@ -33,7 +33,10 @@ See [Release process](docs/release-process.md) for how releases are cut.
   `windows-x86_64` pointing at the NSIS setup before the release is published.
   Release versions are also checked across `package.json`, `Cargo.toml` and
   `Cargo.lock` on every push: a stale lock made a freshly installed build report
-  the old version and reinstall the same update forever.
+  the old version and reinstall the same update forever. The feed's `notes` —
+  the text the in-app what's-new banner shows — now carries this version's
+  changelog section instead of an empty string, and the release job fails rather
+  than publish a feed whose notes are blank.
 - **Bring the old patient list over in one go** — Patients → Import reads a
   CSV exported from another system (Excel, Google Sheets, Dentally, Open
   Dental), recognises the usual column names, and shows exactly what it will do

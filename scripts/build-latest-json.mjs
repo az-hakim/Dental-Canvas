@@ -18,7 +18,15 @@
  *   node scripts/build-latest-json.mjs \
  *     --dir verify --version 1.5.0 --tag v1.5.0 \
  *     --repo az-hakim/Dental-Canvas --require windows-x86_64 \
+ *     --notes-file verify/release-notes.md \
  *     --out verify/latest.json
+ *
+ * The feed's `notes` is the text the in-app updater shows as "what's new"
+ * (`update.body` in src/client/lib/updater.ts). It used to be written empty,
+ * so every install that updated through the app saw a blank banner. Notes are
+ * therefore required: the release job passes this version's changelog (see
+ * scripts/release-notes.mjs), and a feed with nothing to say fails here instead
+ * of shipping.
  *
  * Exits 1 when a required platform has no signed package, so a release that
  * Windows cannot update from never gets published.
@@ -28,7 +36,7 @@ import { readFileSync, writeFileSync, readdirSync, existsSync } from "node:fs";
 import path from "node:path";
 
 function parseArgs(argv) {
-  const out = { dir: ".", out: null, version: null, tag: null, repo: null, require: [] };
+  const out = { dir: ".", out: null, version: null, tag: null, repo: null, require: [], notes: null, notesFile: null };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     const next = () => {
@@ -43,6 +51,8 @@ function parseArgs(argv) {
       case "--tag": out.tag = next(); break;
       case "--repo": out.repo = next(); break;
       case "--require": out.require.push(next()); break;
+      case "--notes": out.notes = next(); break;
+      case "--notes-file": out.notesFile = next(); break;
       default: throw new Error(`unknown argument ${arg}`);
     }
   }
@@ -64,11 +74,32 @@ const PLATFORMS = [
   { key: "darwin-x86_64", match: (name) => /(x64|x86_64).*\.app\.tar\.gz$/i.test(name) },
 ];
 
+/**
+ * The release notes for the feed, from `--notes-file` (a file the release job
+ * writes) or `--notes` (a literal). Never empty: the updater renders this
+ * verbatim, and an empty string is a silent blank panel in the app.
+ */
+function readNotes(args) {
+  let notes = args.notes ?? "";
+  if (args.notesFile) {
+    if (!existsSync(args.notesFile)) throw new Error(`--notes-file ${args.notesFile} does not exist`);
+    notes = readFileSync(args.notesFile, "utf8");
+  }
+  const trimmed = notes.trim();
+  if (!trimmed) {
+    throw new Error(
+      "no release notes: pass --notes-file (or --notes) so the feed's `notes` field — the in-app what's-new text — is not blank",
+    );
+  }
+  return trimmed;
+}
+
 function main() {
   const args = parseArgs(process.argv.slice(2));
   if (!args.version || !args.tag || !args.repo) {
     throw new Error("--version, --tag and --repo are required");
   }
+  const notes = readNotes(args);
 
   const dir = path.resolve(args.dir);
   const files = readdirSync(dir).filter((name) => !name.startsWith("."));
@@ -103,7 +134,7 @@ function main() {
 
   const feed = {
     version: args.version.replace(/^v/i, ""),
-    notes: "",
+    notes,
     pub_date: new Date().toISOString(),
     platforms,
   };
@@ -113,6 +144,7 @@ function main() {
 
   console.log(`wrote ${out}`);
   console.log(`  version ${feed.version}`);
+  console.log(`  notes   ${notes.length} chars`);
   for (const [key, entry] of Object.entries(platforms)) {
     console.log(`  ${key.padEnd(16)} ${entry.url.split("/").pop()} (signed)`);
   }

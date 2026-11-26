@@ -680,6 +680,30 @@ jobs:
             --repo "${GITHUB_REPOSITORY}"
           ls -la verify
 
+      # The feed's `notes` is exactly what the in-app updater prints as "what's
+      # new" (`update.body` in src/client/lib/updater.ts), and the same text
+      # reads better on the release page than three concurrent platform blurbs.
+      # Take this version's section from CHANGELOG.md; a tag cut before the
+      # section existed falls back to the release body, and a release with
+      # neither fails in the feed step below instead of publishing blank notes.
+      - name: Release notes for this version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          if ! node scripts/release-notes.mjs \
+            --version "${GITHUB_REF_NAME#v}" \
+            --changelog CHANGELOG.md \
+            --out release-notes.md; then
+            echo "::warning::No CHANGELOG section for ${GITHUB_REF_NAME}; falling back to the release body."
+            gh release view "${GITHUB_REF_NAME}" --json body -q .body --repo "${GITHUB_REPOSITORY}" > release-notes.md
+          fi
+          if [ -z "$(tr -d '[:space:]' < release-notes.md)" ]; then
+            echo "::error::${GITHUB_REF_NAME} has no release notes — add a ## v${GITHUB_REF_NAME#v} section to CHANGELOG.md so the updater's what's-new banner is not blank."
+            exit 1
+          fi
+          echo "release notes: $(wc -c < release-notes.md) bytes"
+
       # tauri-action writes a latest.json from each platform job, and the
       # Windows, Linux and macOS jobs upload concurrently to the same draft
       # release — whichever finishes last wins. A feed without
@@ -695,6 +719,7 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --require windows-x86_64 \
             --require linux-x86_64 \
+            --notes-file release-notes.md \
             --out verify/latest.json
 
       - name: Verify embedded frontend in every published package
@@ -729,7 +754,12 @@ jobs:
               assert entry["signature"] == sig, f"{plat} signature does not match {name}.sig"
           win = feed["platforms"]["windows-x86_64"]["url"]
           assert win.endswith("-setup.exe"), f"windows feed points at {win}, not the NSIS installer"
-          print("latest.json OK:", feed["version"], sorted(feed["platforms"]))
+          # The updater shows this string as the update's release notes. An
+          # empty one is a blank panel in the app, which is what this job is
+          # here to prevent.
+          notes = (feed.get("notes") or "").strip()
+          assert len(notes) >= 20, f"latest.json notes are blank or too short ({len(notes)} chars) — the in-app what's-new banner would be empty"
+          print("latest.json OK:", feed["version"], sorted(feed["platforms"]), f"notes {len(notes)} chars")
           PY
 
       # The repo's scripts/stylesheet-classes.txt is the class set the build is
@@ -787,5 +817,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release edit "${GITHUB_REF_NAME}" --draft=false --repo "${GITHUB_REPOSITORY}"
+          # The release page shows the same notes the updater does, so the
+          # changelog replaces the per-platform installer blurbs the build jobs
+          # wrote concurrently into the draft.
+          gh release edit "${GITHUB_REF_NAME}" \
+            --notes-file release-notes.md \
+            --draft=false --repo "${GITHUB_REPOSITORY}"
           echo "Release ${GITHUB_REF_NAME} published"

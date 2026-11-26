@@ -139,8 +139,12 @@ Note: if you add Rust dependencies (`src-tauri/Cargo.toml`), don't commit Cargo.
      overflow-hidden children of `fixed` overlays without a height bound.
    - Carry forward the v1.4.19 bulletproof scroll + post-update banner work.
 
-   Commit the notes with `gh release edit v1.4.20 --title "Dental Canvas v1.4.20"
-   --notes "$(cat RELEASE-NOTES.md)"` after the tag is pushed.
+   The publish job takes this section straight out of `CHANGELOG.md`
+   (`scripts/release-notes.mjs`) and uses it for both the release page and the
+   updater feed's `notes`, so there is no separate `RELEASE-NOTES.md` to write
+   or `gh release edit` to run by hand. Keep the section for the tag's version
+   in the changelog before tagging; a tag with no section falls back to the
+   release body it was drafted with.
 
 5. Verify-and-publish: the embedded-frontend hash check, the `latest.json`
    feed cross-check, the shipped stylesheet class snapshot, and publishing of
@@ -155,7 +159,16 @@ Note: if you add Rust dependencies (`src-tauri/Cargo.toml`), don't commit Cargo.
    `windows-x86_64` entry reports "no update available" forever. The generated
    feed is asserted to point Windows at the `-setup.exe`, to carry the signature
    from the matching `.sig`, and to list both `windows-x86_64` and
-   `linux-x86_64` before the release is flipped live. The download step of the
+   `linux-x86_64` before the release is flipped live.
+
+   The feed's `notes` field is what the in-app updater shows as "what's new"
+   (`update.body` in `src/client/lib/updater.ts`). It used to be written as an
+   empty string, so every install that updated through the app saw a blank
+   panel. The job now passes the version's changelog section with
+   `--notes-file`, `scripts/build-latest-json.mjs` refuses to write a feed with
+   empty notes at all, and the publish step applies the same text to the release
+   page — the three platform jobs used to race each other writing per-platform
+   installer blurbs into that body. The download step of the
    verify job must use `--pattern` to fetch every package artifact (a plain
    `gh release download` silently drops some assets, which would make the
    verify gate report `file not found` on a valid build).
