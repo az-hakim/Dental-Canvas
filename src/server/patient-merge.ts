@@ -99,17 +99,34 @@ export function unionAlerts(values: (string | null | undefined)[]): string[] {
   return out;
 }
 
+/**
+ * One statement counting every child table for one patient. Exported so a test
+ * can check it survives the hosted deployment's table renaming.
+ */
+export function patientRowCountSql(): string {
+  return `SELECT ${MERGE_CHILD_TABLES.map(
+    ({ table }, index) => `(SELECT COUNT(*) FROM ${table} WHERE patient_id = ?) AS c${index}`,
+  ).join(", ")}`;
+}
+
 /** How much history each record holds — shown before a merge is confirmed. */
 export async function countPatientRows(patientId: number): Promise<MergeCounts> {
   // Scalar subqueries, not a UNION: SQLite caps a compound SELECT at a handful
   // of terms ("too many terms in compound SELECT"), and this one statement
   // keeps the preview to a single round trip on a remote database.
-  const sql = `SELECT ${MERGE_CHILD_TABLES.map(
-    ({ table }) => `(SELECT COUNT(*) FROM ${table} WHERE patient_id = ?) AS ${table}`,
-  ).join(", ")}`;
-  const row = await get<Record<string, number>>(sql, MERGE_CHILD_TABLES.map(() => patientId));
+  //
+  // The aliases are positional (`c0`, `c1`, …) on purpose: a hosted deployment
+  // renames every tenant *table* identifier on its way to the driver, so
+  // `AS appointments` came back as `t_<clinic>_appointments` and every count
+  // read as zero. Aliases that are not table names cannot be rewritten.
+  const row = await get<Record<string, number>>(
+    patientRowCountSql(),
+    MERGE_CHILD_TABLES.map(() => patientId),
+  );
   const counts: MergeCounts = {};
-  for (const { table } of MERGE_CHILD_TABLES) counts[table] = Number(row?.[table] ?? 0);
+  MERGE_CHILD_TABLES.forEach(({ table }, index) => {
+    counts[table] = Number(row?.[`c${index}`] ?? 0);
+  });
   return counts;
 }
 

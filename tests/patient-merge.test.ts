@@ -1,6 +1,12 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createTestContext, freshApp, jsonRequest, type TestContext } from "./helpers";
-import { mergePatientFields, unionAlerts, type MergePatientRow } from "../src/server/patient-merge";
+import {
+  mergePatientFields,
+  patientRowCountSql,
+  unionAlerts,
+  type MergePatientRow,
+} from "../src/server/patient-merge";
+import { rewriteSql } from "../src/server/tenant/sql-prefix";
 
 let ctx: TestContext;
 let app: Awaited<ReturnType<typeof freshApp>>;
@@ -253,6 +259,17 @@ describe("merge field rules", () => {
       "allergy:penicillin",
       "allergy:latex",
     ]);
+  });
+
+  it("survives the hosted deployment's table renaming", () => {
+    // A clinic's tables are physically renamed on the way to the driver. A
+    // count aliased after its table (`AS appointments`) was renamed too, so the
+    // preview read every column as undefined and promised "no history" for a
+    // record full of it — on production only.
+    const rewritten = rewriteSql(patientRowCountSql(), "t_clinic1234_");
+    expect(rewritten).toContain("AS c0");
+    expect(rewritten).toContain("FROM t_clinic1234_appointments");
+    expect(rewritten).not.toMatch(/AS t_clinic1234_/);
   });
 
   it("leaves alerts alone when only one record has them", () => {
