@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Aperture, ImageIcon, Move, Pencil, RotateCcw, Scissors, Trash2, Upload, X, ZoomIn, ZoomOut } from "lucide-react";
-import { api, apiFetch } from "@/api";
-import { useAuthImageSrc } from "@/lib/images";
+import { api } from "@/api";
 import { useApp } from "@/context";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -98,9 +97,7 @@ export function ImagesGallery({ patientId }: Props) {
       for (let i = 0; i < meta.uploads.length; i++) {
         const up = meta.uploads[i];
         const f = candidates[i];
-        // Built-in DB storage PUTs the bytes to this app's own API, which needs
-        // the session; bucket URLs are presigned and stay header-only.
-        const r = await apiFetch(up.upload_url, { method: "PUT", headers: up.headers ?? {}, body: f });
+        const r = await fetch(up.upload_url, { method: "PUT", headers: up.headers ?? {}, body: f });
         if (!r.ok) throw new Error(`Upload of "${f.name}" failed (${r.status}).`);
         finalized.push({
           key: up.key,
@@ -311,13 +308,12 @@ function ImageCard({
   onDelete: () => void;
 }) {
   const dicom = isDicomFile(image.mime_type);
-  const src = useAuthImageSrc(image.url);
   return (
     <div className="group relative overflow-hidden rounded-lg border bg-muted/40">
       <button onClick={onOpen} className="block aspect-[4/3] w-full" title={image.label || image.file_name || "View image"}>
-        {src && !dicom ? (
+        {image.url && !dicom ? (
           <img
-            src={src}
+            src={image.url}
             alt={image.label || image.file_name || "Patient image"}
             className="h-full w-full object-cover"
             loading="lazy"
@@ -388,7 +384,6 @@ function ImageViewer({
   const prev = idx > 0 ? images[idx - 1] : null;
   const next = idx >= 0 && idx < images.length - 1 ? images[idx + 1] : null;
   const dicom = isDicomFile(image.mime_type);
-  const src = useAuthImageSrc(image.url);
 
   function reset() {
     setZoom(1);
@@ -467,9 +462,9 @@ function ImageViewer({
         }}
         onDoubleClick={reset}
       >
-        {src && !dicom ? (
+        {image.url && !dicom ? (
           <img
-            src={src}
+            src={image.url}
             alt={image.label || image.file_name || "Patient image"}
             draggable={false}
             className="absolute left-1/2 top-1/2"
@@ -638,8 +633,6 @@ function CompareDialog({
   const [a, setA] = useState<PatientImage | null>(initialA);
   const [b, setB] = useState<PatientImage | null>(null);
   const [pos, setPos] = useState(50);
-  const aSrc = useAuthImageSrc(a?.url ?? null);
-  const bSrc = useAuthImageSrc(b?.url ?? null);
 
   useEffect(() => {
     if (!a || b) return;
@@ -649,7 +642,7 @@ function CompareDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [a]);
 
-  const canCompare = Boolean(a && b && a.id !== b.id && aSrc && bSrc);
+  const canCompare = Boolean(a && b && a.id !== b.id && a.url && b.url);
 
   function pick(side: "a" | "b", id: number) {
     const img = images.find((i) => i.id === id);
@@ -703,7 +696,7 @@ function CompareDialog({
 
         {canCompare ? (
           <div className="relative select-none overflow-hidden rounded-lg border bg-black">
-            <img src={aSrc!} alt="Before" className="block w-full" draggable={false} />
+            <img src={a!.url!} alt="Before" className="block w-full" draggable={false} />
             <div
               className="absolute inset-0"
               style={{ clipPath: `inset(0 0 0 ${pos}%)` }}
@@ -713,7 +706,7 @@ function CompareDialog({
                 setPos(Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100)));
               }}
             >
-              <img src={bSrc!} alt="After" className="block w-full" draggable={false} />
+              <img src={b!.url!} alt="After" className="block w-full" draggable={false} />
             </div>
             <div className="pointer-events-none absolute inset-y-0" style={{ left: `${pos}%` }}>
               <div className="absolute inset-y-0 w-0.5 -translate-x-1/2 bg-white/90" />

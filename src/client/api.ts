@@ -49,20 +49,6 @@ export function apiUrl(path: string): string {
   return base && path.startsWith("/") ? `${base}${path}` : path;
 }
 
-/**
- * True when `url` points at this deployment's own API. Presigned bucket URLs
- * are third-party and must never receive the caller's session token; only our
- * own routes need it — and on a hosted deployment they require it.
- */
-export function isAppApiUrl(url: string): boolean {
-  if (url.startsWith("/api/")) return true;
-  const target = apiUrl(url);
-  const base = apiBaseUrl();
-  if (base) return target === base || target.startsWith(`${base}/api/`);
-  if (typeof window === "undefined") return false;
-  return target.startsWith(`${window.location.origin}/api/`);
-}
-
 async function sessionHeaders(): Promise<Record<string, string>> {
   if (!supabase) return {};
   try {
@@ -72,32 +58,6 @@ async function sessionHeaders(): Promise<Record<string, string>> {
   } catch {
     return {};
   }
-}
-
-/**
- * Fetch bytes from our own API with the caller's session attached.
- *
- * JSON calls go through `api()`; this is for the paths that are not JSON — the
- * built-in image store's PUT/GET, and image bytes rendered on screen. A bare
- * `fetch()` skipped the bearer token, so a hosted deployment answered 401 and
- * every upload (and thumbnail) failed.
- */
-export async function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
-  const target = apiUrl(input);
-  const ours = isAppApiUrl(target);
-  const opts: RequestInit = { ...init };
-  if (ours) {
-    const headers = new Headers(init.headers);
-    for (const [name, value] of Object.entries(await sessionHeaders())) headers.set(name, value);
-    opts.headers = headers;
-  }
-  const r = await fetch(target, opts);
-  if (r.status === 401 && ours) {
-    // Same signal as `api()`: the shell returns to the sign-in screen instead
-    // of reporting a bare 401 on the upload/thumbnail that happened to run.
-    window.dispatchEvent(new CustomEvent("dental-canvas:auth-required"));
-  }
-  return r;
 }
 
 export async function api<T>(method: string, path: string, body?: unknown): Promise<T> {

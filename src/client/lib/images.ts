@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { apiFetch, isAppApiUrl } from "@/api";
 
 /**
  * An image attached to a prescription sheet. `src` may be a cross-origin
@@ -24,9 +23,7 @@ export async function imageToDataUrl(src: string): Promise<string | null> {
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 15_000);
-    // Authenticated: DB-backed images are served by this app's API, which a
-    // hosted deployment only answers for the signed-in clinic.
-    const res = await apiFetch(src, { signal: controller.signal });
+    const res = await fetch(src, { signal: controller.signal });
     clearTimeout(timer);
     if (!res.ok) return null;
     const blob = await res.blob();
@@ -51,47 +48,6 @@ export async function materializeSheetImages(images: SheetImage[]): Promise<Shee
       return { ...im, src };
     }),
   );
-}
-
-/**
- * Resolve an image for an <img> tag.
- *
- * Images stored in the app's own database are served by `/api/image-file`,
- * which needs the caller's session — an <img> src cannot send it, so a hosted
- * deployment showed 401/broken thumbnails. Fetch those bytes with the token
- * and hand back an object URL; presigned bucket URLs load directly.
- */
-export function useAuthImageSrc(src: string | null | undefined): string | null {
-  const [resolved, setResolved] = useState<string | null>(src ?? null);
-
-  useEffect(() => {
-    if (!src) {
-      setResolved(null);
-      return;
-    }
-    if (!isAppApiUrl(src)) {
-      setResolved(src);
-      return;
-    }
-    let cancelled = false;
-    let objectUrl: string | null = null;
-    setResolved(null);
-    void apiFetch(src)
-      .then(async (res) => {
-        if (!res.ok) return;
-        const blob = await res.blob();
-        if (cancelled) return;
-        objectUrl = URL.createObjectURL(blob);
-        setResolved(objectUrl);
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [src]);
-
-  return resolved;
 }
 
 /**
