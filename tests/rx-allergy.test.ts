@@ -91,6 +91,42 @@ describe("a drug against the chart's allergies", () => {
     ).toHaveLength(1);
   });
 
+  // Matching is word by word. That has to hold at the edges: a salt is not
+  // the family, a strength does not hide the drug, and a shared word is not a
+  // shared risk.
+  it("does not read a sulfa tag as any sulfate salt", () => {
+    expect(findAllergyConflicts("allergy:sulfa", [{ drug_name: "Ferrous sulfate" }])).toEqual([]);
+  });
+
+  it("matches the sulfa tag an imported chart carries to a sulfonamide", () => {
+    // patient-import.ts writes "Allergic to sulfa drugs" as allergy:sulfa-drugs.
+    expect(findAllergyConflicts("allergy:sulfa-drugs", [{ drug_name: "Co-trimoxazole" }])).toHaveLength(1);
+    expect(findAllergyConflicts("allergy:sulfonamide", [{ drug_name: "Sulfamethoxazole" }])).toHaveLength(1);
+  });
+
+  it("reads through the strength a dragged-in drug name carries", () => {
+    expect(findAllergyConflicts("allergy:metronidazole", [{ drug_name: "Metronidazole 400 mg" }])).toEqual([
+      { drug: "Metronidazole 400 mg", allergy: "metronidazole", basis: "name" },
+    ]);
+  });
+
+  it("reads a chart's plural the way it reads the singular", () => {
+    expect(findAllergyConflicts("allergy:NSAIDs", [{ drug_name: "Ibuprofen" }])).toHaveLength(1);
+  });
+
+  it("accepts the other spelling of amoxicillin", () => {
+    expect(findAllergyConflicts("allergy:amoxycillin", [{ drug_name: "Amoxicillin" }])).toHaveLength(1);
+  });
+
+  it("catches an allergy that is the tail of the drug's name", () => {
+    expect(findAllergyConflicts("allergy:cortisone", [{ drug_name: "Hydrocortisone" }])).toHaveLength(1);
+  });
+
+  it("does not turn one shared word into a match", () => {
+    // "acid" is in both names; neither name is the other.
+    expect(findAllergyConflicts("allergy:folic acid", [{ drug_name: "Acetylsalicylic acid" }])).toEqual([]);
+  });
+
   it("reports a conflict for every drug that has one", () => {
     const conflicts = findAllergyConflicts("allergy:penicillin,allergy:nsaid", [
       amox,

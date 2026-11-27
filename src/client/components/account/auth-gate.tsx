@@ -3,7 +3,13 @@ import { Cloud, HardDrive, Loader2, ShieldCheck, Stethoscope } from "lucide-reac
 import { useAuth } from "@/auth";
 import { Button } from "@/components/ui/button";
 import { isTauriDesktop } from "@/offline/activate";
-import { hasLocalPracticeDatabase, useHostedPractice, useThisComputer } from "@/lib/local-practice";
+import {
+  firstRunScreen,
+  hasLocalPracticeDatabase,
+  useHostedPractice,
+  useThisComputer,
+  type FirstRunScreen,
+} from "@/lib/local-practice";
 import { buildTimeApiBaseUrl, savedApiBaseUrl } from "@/lib/api-base";
 import { AccountStep } from "./account-step";
 
@@ -18,40 +24,47 @@ import { AccountStep } from "./account-step";
  * fresh install has not chosen where its records live yet, so it is offered
  * that choice: this computer (the bundled backend, no account — the behavior
  * every earlier version had) or the hosted practice, which is only a saved
- * api-base away. And an install that ran its own backend before the installer
- * started shipping pointed at the hosted practice still holds that practice's
- * database: updating into a sign-in gate with no door back to it would lock a
- * clinic out of its own records, so when such a database is found the gate
- * offers to open it directly.
+ * api-base away. The local choice says outright that it starts an empty
+ * practice, because the installers ship pointed at the hosted practice and a
+ * clinic that picked it expecting its own patients would read the empty chart
+ * list as data loss. And an install that ran its own backend before the
+ * installer started shipping pointed at the hosted practice still holds that
+ * practice's database: updating into a sign-in gate with no door back to it
+ * would lock a clinic out of its own records, so when such a database is found
+ * the gate offers to open it directly.
  */
 export function AuthGate() {
   const auth = useAuth();
-  const [desktop, setDesktop] = useState(false);
-  const [localPractice, setLocalPractice] = useState(false);
-  const [chooser, setChooser] = useState(false);
+  // Which door this install opens on. The rule itself lives in firstRunScreen
+  // so it can be tested without a browser; the probe below can only move an
+  // install from the chooser to the records already on disk.
+  const [screen, setScreen] = useState<FirstRunScreen>(() =>
+    firstRunScreen({ desktop: isTauriDesktop(), savedBase: savedApiBaseUrl(), localDatabase: false }),
+  );
   const [hostedUrl, setHostedUrl] = useState("");
   const [hostedInvalid, setHostedInvalid] = useState(false);
 
   useEffect(() => {
     // Only a desktop shell can run the bundled backend; in a browser this
-    // probe would find nothing (or, worse, a dropdown from a URL that has
+    // probe would find nothing (or, worse, a database from a URL that has
     // since become the hosted practice).
     if (!isTauriDesktop()) return;
-    setDesktop(true);
     setHostedUrl(buildTimeApiBaseUrl());
-    // Nothing saved and no database on disk: this install has never chosen.
-    setChooser(savedApiBaseUrl() === null);
+    const savedBase = savedApiBaseUrl();
     let alive = true;
     void hasLocalPracticeDatabase().then((found) => {
-      if (!alive) return;
-      setLocalPractice(found);
-      // Records left by an earlier version answer the question already.
-      if (found) setChooser(false);
+      if (alive) setScreen(firstRunScreen({ desktop: true, savedBase, localDatabase: found }));
     });
     return () => {
       alive = false;
     };
   }, []);
+
+  /** The local half of the choice: this install's own backend, then a reload. */
+  function chooseThisComputer() {
+    useThisComputer();
+    window.location.reload();
+  }
 
   function chooseHosted() {
     if (!useHostedPractice(hostedUrl)) {
@@ -74,7 +87,7 @@ export function AuthGate() {
           </div>
         </div>
 
-        {desktop && chooser && (
+        {screen === "chooser" && (
           <div className="mb-3 rounded-2xl border border-primary/30 bg-card/90 p-4 shadow-sm backdrop-blur">
             <p className="flex items-center gap-2 text-sm font-medium">
               <HardDrive className="h-4 w-4 shrink-0 text-primary" />
@@ -85,18 +98,14 @@ export function AuthGate() {
               in to the hosted practice your clinic already uses. You can change this later in
               Settings → Account.
             </p>
-            <Button
-              className="mt-3 w-full gap-2 rounded-full"
-              onClick={() => {
-                useThisComputer();
-                window.location.reload();
-              }}
-            >
+            <Button className="mt-3 w-full gap-2 rounded-full" onClick={chooseThisComputer}>
               <HardDrive className="h-4 w-4" />
               Use this computer
             </Button>
             <p className="mt-1.5 text-[11px] text-muted-foreground">
-              Recommended for a single computer. The database stays here and nothing is uploaded.
+              Starts an empty practice on this computer. Nothing is uploaded, but records from
+              another computer — including your clinic's hosted practice — will not appear here.
+              If your clinic already keeps its records on the hosted practice, sign in below.
             </p>
             {!buildTimeApiBaseUrl() && (
               <input
@@ -151,7 +160,7 @@ export function AuthGate() {
           )}
         </div>
 
-        {localPractice && (
+        {screen === "records" && (
           <div className="mt-3 rounded-2xl border border-dashed border-primary/40 bg-card/80 p-4 shadow-sm backdrop-blur">
             <p className="flex items-center gap-2 text-sm font-medium">
               <HardDrive className="h-4 w-4 shrink-0 text-primary" />
@@ -162,14 +171,7 @@ export function AuthGate() {
               still here: you can keep working in it without an account, and nothing is uploaded or
               deleted.
             </p>
-            <Button
-              variant="outline"
-              className="mt-3 w-full gap-2 rounded-full"
-              onClick={() => {
-                useThisComputer();
-                window.location.reload();
-              }}
-            >
+            <Button variant="outline" className="mt-3 w-full gap-2 rounded-full" onClick={chooseThisComputer}>
               <HardDrive className="h-4 w-4" />
               Open this computer's records
             </Button>

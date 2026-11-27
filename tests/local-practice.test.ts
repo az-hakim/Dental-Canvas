@@ -7,6 +7,7 @@ import {
 } from "../src/client/lib/api-base";
 import {
   LOCAL_DB_NAME,
+  firstRunScreen,
   hasLocalPracticeDatabase,
   useHostedPractice,
   useThisComputer,
@@ -92,6 +93,42 @@ describe("choosing the hosted practice", () => {
     }
     expect(store.has(STORAGE_KEY)).toBe(false);
     expect(savedApiBaseUrl()).toBeNull();
+  });
+});
+
+// ── Which door a desktop install opens on ─────────────────────────
+//
+// The chooser is the screen that offers to start an empty local practice, so
+// getting its trigger right is what keeps a hosted clinic out of a blank
+// database: it appears only where nothing has been chosen and no records exist.
+
+describe("which door a desktop install opens on", () => {
+  const screen = (input: Partial<Parameters<typeof firstRunScreen>[0]> = {}) =>
+    firstRunScreen({ desktop: true, savedBase: null, localDatabase: false, ...input });
+
+  it("asks a fresh desktop install, before it can pick a backend by accident", () => {
+    expect(screen()).toBe("chooser");
+  });
+
+  it("does not ask again once either choice is saved", () => {
+    // A hosted address and "this computer" ("") are both answers; only a null
+    // saved value means the install has never been through the question.
+    expect(screen({ savedBase: "https://clinic.example" })).toBe("gate");
+    expect(screen({ savedBase: "" })).toBe("gate");
+  });
+
+  it("offers the records already on disk first, whatever was saved", () => {
+    // A clinic that ran its own backend must reach its patients, not be asked
+    // where they should have lived.
+    expect(screen({ localDatabase: true })).toBe("records");
+    expect(screen({ localDatabase: true, savedBase: "https://clinic.example" })).toBe("records");
+  });
+
+  it("never offers the local database in a browser", () => {
+    // No bundled backend to point at, and the probe could find an unrelated
+    // database from the very URL that is now the hosted practice.
+    expect(screen({ desktop: false })).toBe("gate");
+    expect(screen({ desktop: false, localDatabase: true })).toBe("gate");
   });
 });
 

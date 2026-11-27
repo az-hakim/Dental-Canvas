@@ -102,21 +102,20 @@ function readNotes(args) {
 }
 
 /**
- * The feed tauri-action left on the release, split into the entries this
- * release can keep and the rest of its top level. Only entries that point at
- * this tag survive: a feed must never carry last release's artifacts forward.
+ * The platform entries the feed tauri-action left on the release has that this
+ * release can keep. Only entries that point at this tag and carry a signature
+ * survive: a feed must never carry last release's artifacts forward. The rest
+ * of that file (version, notes, pub_date) is this script's to write.
  */
 function readExistingFeed(outPath, tag, repo) {
-  if (!existsSync(outPath)) return { extraTop: {}, entries: {} };
+  if (!existsSync(outPath)) return {};
   let parsed;
   try {
     parsed = JSON.parse(readFileSync(outPath, "utf8"));
   } catch {
-    return { extraTop: {}, entries: {} };
+    return {};
   }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return { extraTop: {}, entries: {} };
-  }
+  if (!parsed || typeof parsed !== "object") return {};
   const prefix = `https://github.com/${repo}/releases/download/${tag}/`;
   const source = parsed.platforms && typeof parsed.platforms === "object" ? parsed.platforms : {};
   const entries = {};
@@ -126,9 +125,7 @@ function readExistingFeed(outPath, tag, repo) {
     if (typeof entry.signature !== "string" || !entry.signature.trim()) continue;
     entries[key] = entry;
   }
-  const extraTop = { ...parsed };
-  for (const key of ["platforms", "version", "notes", "pub_date"]) delete extraTop[key];
-  return { extraTop, entries };
+  return entries;
 }
 
 function main() {
@@ -170,11 +167,10 @@ function main() {
   }
 
   const out = path.resolve(args.out ?? path.join(dir, "latest.json"));
-  const { extraTop, entries } = readExistingFeed(out, args.tag, args.repo);
+  const entries = readExistingFeed(out, args.tag, args.repo);
   const kept = Object.keys(entries).filter((key) => !(key in platforms));
 
   const feed = {
-    ...extraTop,
     version: args.version.replace(/^v/i, ""),
     notes,
     pub_date: new Date().toISOString(),

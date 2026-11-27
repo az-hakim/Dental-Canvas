@@ -79,6 +79,35 @@ export async function hasLocalPracticeDatabase(factory: IdbFactoryLike | null = 
 }
 
 /**
+ * The door a desktop install opens on.
+ *
+ * `chooser` is the first-run question (this computer, or the hosted practice);
+ * `records` is the offer to open a database an earlier version left on this
+ * computer, which answers the question without being asked; `gate` is the
+ * sign-in form, either because a choice was already saved or because this is
+ * not a desktop shell (a browser has no bundled backend to fall back to).
+ */
+export type FirstRunScreen = "gate" | "chooser" | "records";
+
+/**
+ * What a desktop install should show before anything boots. Kept out of the
+ * gate component so the rule can be tested without a browser: records on disk
+ * win (that clinic must get back into them), then an install that never chose
+ * is asked, and anything else goes straight to sign-in.
+ */
+export function firstRunScreen(input: {
+  desktop: boolean;
+  /** The saved override: a server URL, "" for this computer, null for no choice yet. */
+  savedBase: string | null;
+  /** Whether this computer holds an earlier install's SQLite practice image. */
+  localDatabase: boolean;
+}): FirstRunScreen {
+  if (!input.desktop) return "gate";
+  if (input.localDatabase) return "records";
+  return input.savedBase === null ? "chooser" : "gate";
+}
+
+/**
  * Point this install back at its own backend — the same switch Settings →
  * Account offers, reachable from the sign-in gate. Caller reloads, because the
  * shell picks its backend at boot.

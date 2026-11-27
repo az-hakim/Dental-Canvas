@@ -28,7 +28,7 @@ import {
   INVOICE_STYLE_IDS,
 } from "./seed";
 import { reindexSearchIndex, searchAll } from "./search";
-import { allergyConflictMessage, findAllergyConflicts } from "./rx-allergy";
+import { allergyConflictMessage, findAllergyConflicts, type PrescribedDrug } from "./rx-allergy";
 import {
   MAX_PATIENT_IMPORT_BYTES,
   MAX_IMPORT_ROWS,
@@ -1707,6 +1707,22 @@ app.post("/api/email/worklist-digest", async (c) => {
   }
 });
 
+/**
+ * The 409 body when the chart's `allergy:` tags refuse these drugs, or null
+ * when they do not. Both prescription routes ask the same question, and the
+ * check runs before anything is written, so a refusal leaves the chart as it
+ * was. Callers skip it only when the request acknowledged the conflict.
+ */
+async function allergyRefusal(patientId: number, drugs: PrescribedDrug[]) {
+  const patient = await get<{ medical_alerts: string | null }>(
+    "SELECT medical_alerts FROM patients WHERE id = ?",
+    [patientId],
+  );
+  const conflicts = findAllergyConflicts(patient?.medical_alerts ?? null, drugs);
+  if (!conflicts.length) return null;
+  return { error: allergyConflictMessage(conflicts), conflicts };
+}
+
 app.post("/api/prescriptions", async (c) => {
   const parsed = await parseJson(c, PrescriptionInput);
   if (!parsed.ok) return c.json({ error: parsed.error }, 400);
@@ -1714,16 +1730,10 @@ app.post("/api/prescriptions", async (c) => {
   if (d.template !== undefined && !(await isKnownTemplateId(d.template))) {
     return c.json({ error: "Unknown prescription template" }, 400);
   }
-  // The chart's allergy tags are enforced here, not left to the printed sheet:
-  // a drug whose name or family matches `allergy:<name>` is refused unless
-  // the caller explicitly acknowledges it.
+  // The chart's allergy tags are enforced here, not left to the printed sheet.
   if (!d.acknowledge_allergy) {
-    const patient = await get<{ medical_alerts: string | null }>(
-      "SELECT medical_alerts FROM patients WHERE id = ?",
-      [d.patient_id],
-    );
-    const conflicts = findAllergyConflicts(patient?.medical_alerts ?? null, d.items);
-    if (conflicts.length) return c.json({ error: allergyConflictMessage(conflicts), conflicts }, 409);
+    const refusal = await allergyRefusal(d.patient_id, d.items);
+    if (refusal) return c.json(refusal, 409);
   }
   const result = await run(
     `INSERT INTO prescriptions (patient_id, practitioner_id, issued_date, template, large_print, tooth, plan_item_id, diagnosis, on_examination, history, advice, follow_up, follow_up_date, patient_gender, complaints, vitals, investigations)
@@ -1772,14 +1782,10 @@ app.put("/api/prescriptions/:id", async (c) => {
     return c.json({ error: "Unknown prescription template" }, 400);
   }
   // Editing the drugs onto a chart is the same prescribing decision as
-  // creating it, so the allergy tags are checked here too.
+  // creating it, so the allergy tags are checked here too — before any write.
   if (d.items !== undefined && !d.acknowledge_allergy) {
-    const patient = await get<{ medical_alerts: string | null }>(
-      "SELECT medical_alerts FROM patients WHERE id = ?",
-      [existing.patient_id],
-    );
-    const conflicts = findAllergyConflicts(patient?.medical_alerts ?? null, d.items);
-    if (conflicts.length) return c.json({ error: allergyConflictMessage(conflicts), conflicts }, 409);
+    const refusal = await allergyRefusal(existing.patient_id, d.items);
+    if (refusal) return c.json(refusal, 409);
   }
 
   const sets: string[] = [];

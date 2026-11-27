@@ -9,14 +9,20 @@
  * above it on the same page.
  *
  * This module answers the one question the prescription routes need — does a
- * drug on this prescription match an allergy tag on the chart? It claims only
- * what the text says:
+ * drug on this prescription match an allergy tag on the chart? Names are
+ * compared word by word, so a strength or a salt does not hide a drug
+ * (`Metronidazole 400 mg` still matches) and a longer word is not mistaken for
+ * a shorter one (`allergy:sulfa` does not catch ferrous sulfate). It claims
+ * only what the text says:
  *
- *   - an allergy equal to (or contained in) a drug's name or a name it stands
- *     for: `penicillin` catches `Penicillin V (Phenoxymethylpenicillin)`,
- *     `amoxicillin` catches `Co-amoxiclav (Amoxicillin + Clavulanic acid)`;
- *   - an allergy that names a drug family the drug belongs to: `nsaid` catches
- *     naproxen, `penicillin` catches amoxicillin, `aspirin` catches ibuprofen.
+ *   - a tag whose words are the drug's name, fall inside it, or end it:
+ *     `penicillin` catches `Penicillin V (Phenoxymethylpenicillin)`,
+ *     `metronidazole` catches `Metronidazole 400 mg`, `cortisone` catches
+ *     `Hydrocortisone`;
+ *   - a tag naming another name of the same drug or family, because the chart
+ *     and the prescription rarely use the same one: `amoxicillin` catches
+ *     `Augmentin`, `ibuprofen` catches `Brufen`, `metronidazole` catches
+ *     `Flagyl`, `penicillin` catches amoxicillin.
  *
  * It deliberately does not infer cross-family cross-reactivity (penicillin →
  * cephalosporin is a clinical judgement, not a string match), and it ignores
@@ -41,14 +47,18 @@ export interface AllergyConflict {
 }
 
 /**
- * Families where a member allergy means the whole family is off the table.
- * Keys are the family names a chart is likely to carry; the members are the
- * drug names (and brand names) that belong to it.
+ * Names that mean the same drug, or members of a family whose other members
+ * are off the table too. A chart may carry any of them — generic, brand or the
+ * family itself — and the prescription may carry any other, so every spelling
+ * of the same risk lives in one group. Charts pluralise as readily as they
+ * singularise (`NSAIDs`, `penicillins`), so the trailing s is folded away on
+ * both sides and the table only ever lists one form.
  */
-const CLASSES: Record<string, string[]> = {
-  penicillin: [
+const DRUG_GROUPS: string[][] = [
+  [
     "penicillin",
     "amoxicillin",
+    "amoxycillin",
     "amoxiclav",
     "co-amoxiclav",
     "ampicillin",
@@ -56,10 +66,19 @@ const CLASSES: Record<string, string[]> = {
     "phenoxymethylpenicillin",
     "augmentin",
   ],
-  cephalosporin: ["cephalosporin", "cephalexin", "cefixime", "cefuroxime", "ceftriaxone", "cefadroxil", "keflex"],
-  nsaid: [
+  ["cephalosporin", "cephalexin", "cefixime", "cefuroxime", "ceftriaxone", "cefadroxil", "keflex"],
+  [
+    "sulfonamide",
+    "sulfa",
+    "sulfa drugs",
+    "sulfamethoxazole",
+    "co-trimoxazole",
+    "cotrimoxazole",
+    "sulfasalazine",
+    "sulfadiazine",
+  ],
+  [
     "nsaid",
-    "nsaids",
     "ibuprofen",
     "diclofenac",
     "naproxen",
@@ -68,52 +87,85 @@ const CLASSES: Record<string, string[]> = {
     "nimesulide",
     "piroxicam",
     "aspirin",
+    "acetylsalicylic acid",
     "aceclofenac",
     "brufen",
+    "nurofen",
+    "advil",
     "voltaren",
+    "cataflam",
     "ponstan",
   ],
-  macrolide: ["macrolide", "azithromycin", "erythromycin", "clarithromycin", "zithromax"],
-  tetracycline: ["tetracycline", "tetracyclines", "doxycycline", "minocycline"],
-  nitroimidazole: ["nitroimidazole", "metronidazole", "tinidazole", "ornidazole", "secnidazole", "flagyl"],
-  quinolone: ["quinolone", "ciprofloxacin", "levofloxacin", "ofloxacin", "norfloxacin"],
-};
+  ["macrolide", "azithromycin", "erythromycin", "clarithromycin", "zithromax"],
+  ["tetracycline", "doxycycline", "minocycline"],
+  ["nitroimidazole", "metronidazole", "tinidazole", "ornidazole", "secnidazole", "flagyl"],
+  ["quinolone", "ciprofloxacin", "levofloxacin", "ofloxacin", "norfloxacin"],
+  ["paracetamol", "acetaminophen", "panadol", "tylenol", "calpol"],
+  ["clindamycin", "dalacin"],
+  ["fluconazole", "diflucan"],
+  ["chlorhexidine", "corsodyl"],
+  ["benzydamine", "difflam"],
+  ["povidone iodine", "betadine"],
+  ["triamcinolone", "kenalog"],
+  ["lidocaine", "xylocaine"],
+  ["acyclovir", "zovirax"],
+];
+
+/** `nsaids` and `nsaid` name the same thing; so do `penicillins`. */
+function withoutPlural(word: string): string {
+  return word.length > 4 && word.endsWith("s") && !word.endsWith("ss") ? word.slice(0, -1) : word;
+}
+
+/** Lowercase, punctuation to spaces, split into words — the form compared in. */
+function wordsOf(...names: (string | null | undefined)[]): string[] {
+  const words = new Set<string>();
+  for (const name of names) {
+    for (const word of (name ?? "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim()
+      .split(" ")) {
+      if (word) words.add(withoutPlural(word));
+    }
+  }
+  return [...words];
+}
+
+/** A drug name, or a group of names that mean the same risk, as words. */
+type NameWords = string[];
+type NameGroup = NameWords[];
+
+/** The groups, in the same word form. */
+const GROUPS: NameGroup[] = DRUG_GROUPS.map((names) => names.map((name) => wordsOf(name)));
+
+/** The groups a drug belongs to: any of their other names is the same risk. */
+function groupsOf(drugWords: NameWords): NameGroup[] {
+  return GROUPS.filter((group) => group.some((member) => sameName(member, drugWords)));
+}
 
 /**
- * Brand names and alternate spellings a chart may carry instead of the generic
- * name, keyed by the word as it appears in the prescription's drug name.
+ * Every word of `a` appears in `b`. One direction of the match: the allergy
+ * `penicillin` is inside the drug's `["penicillin", "v"]`, and the drug
+ * `["metronidazole", "400", "mg"]` contains the allergy `["metronidazole"]`.
  */
-const SYNONYMS: Record<string, string[]> = {
-  augmentin: ["amoxicillin", "co-amoxiclav"],
-  flagyl: ["metronidazole"],
-  brufen: ["ibuprofen"],
-  nurofen: ["ibuprofen"],
-  advil: ["ibuprofen"],
-  voltaren: ["diclofenac"],
-  cataflam: ["diclofenac"],
-  ponstan: ["mefenamic acid"],
-  panadol: ["paracetamol", "acetaminophen"],
-  tylenol: ["paracetamol", "acetaminophen"],
-  calpol: ["paracetamol", "acetaminophen"],
-  zithromax: ["azithromycin"],
-  keflex: ["cephalexin"],
-  dalacin: ["clindamycin"],
-  diflucan: ["fluconazole"],
-  corsodyl: ["chlorhexidine"],
-  difflam: ["benzydamine"],
-  betadine: ["povidone-iodine"],
-  kenalog: ["triamcinolone"],
-  xylocaine: ["lidocaine"],
-  zovirax: ["acyclovir"],
-};
+function contains(words: string[], other: string[]): boolean {
+  return words.every((word) => other.includes(word));
+}
 
-/** Lowercase, punctuation to spaces, single spaces — the form we compare in. */
-function words(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+/**
+ * One word is the tail of another: `hydrocortisone` ends with `cortisone`,
+ * `phenoxymethylpenicillin` with `penicillin`. Only from five letters up, so
+ * short fragments cannot collide, and only at the end — a prefix rule would
+ * make `allergy:sulfa` catch ferrous sulfate.
+ */
+function endsWithWord(a: string, b: string): boolean {
+  const [shorter, longer] = a.length <= b.length ? [a, b] : [b, a];
+  return shorter.length >= 5 && longer.endsWith(shorter);
+}
+
+/** Same name once the two are read as words, whichever side is longer. */
+function sameName(a: string[], b: string[]): boolean {
+  return contains(a, b) || contains(b, a) || a.some((x) => b.some((y) => endsWithWord(x, y)));
 }
 
 /**
@@ -131,35 +183,15 @@ export function allergyTags(alerts: string | null | undefined): string[] {
   return tags;
 }
 
-/** Every name the prescribed drug may be known by, normalized. */
-function termsOf(drug: PrescribedDrug): Set<string> {
-  const terms = new Set<string>();
-  for (const raw of [drug.drug_name, drug.generic_name ?? ""]) {
-    if (!raw) continue;
-    // "Co-amoxiclav (Amoxicillin + Clavulanic acid)" is three names, and a
-    // chart may carry any of them.
-    for (const part of raw.split(/[(),+/]|\band\b/i)) {
-      const term = words(part);
-      if (!term) continue;
-      terms.add(term);
-      for (const [brand, generics] of Object.entries(SYNONYMS)) {
-        if (!term.split(" ").includes(brand)) continue;
-        for (const generic of generics) terms.add(words(generic));
-      }
-    }
+/** The tags as words, each name once however it is spelled on the chart. */
+function allergiesOf(alerts: string | null | undefined): { raw: string; words: string[] }[] {
+  const byName = new Map<string, { raw: string; words: string[] }>();
+  for (const tag of allergyTags(alerts)) {
+    const words = wordsOf(tag);
+    const key = words.join(" ");
+    if (words.length && !byName.has(key)) byName.set(key, { raw: tag, words });
   }
-  return terms;
-}
-
-/** The families one of those names belongs to. */
-function classesFor(terms: Set<string>): string[] {
-  const found: string[] = [];
-  for (const [family, members] of Object.entries(CLASSES)) {
-    if (members.some((member) => [...terms].some((term) => term === member || (member.length >= 5 && term.includes(member))))) {
-      found.push(family);
-    }
-  }
-  return found;
+  return [...byName.values()];
 }
 
 /**
@@ -170,41 +202,27 @@ export function findAllergyConflicts(
   alerts: string | null | undefined,
   drugs: PrescribedDrug[],
 ): AllergyConflict[] {
-  const allergies = allergyTags(alerts);
+  const allergies = allergiesOf(alerts);
   if (!allergies.length || !drugs.length) return [];
 
   const conflicts: AllergyConflict[] = [];
   const seen = new Set<string>();
   for (const drug of drugs) {
-    const terms = termsOf(drug);
-    if (!terms.size) continue;
-    const families = classesFor(terms);
+    const drugWords = wordsOf(drug.drug_name, drug.generic_name);
+    if (!drugWords.length) continue;
+    const groups = groupsOf(drugWords);
     for (const allergy of allergies) {
-      const wanted = words(allergy);
-      if (!wanted) continue;
-
-      let basis: ConflictBasis | null = null;
-      for (const term of terms) {
-        if (term === wanted || (wanted.length >= 4 && term.includes(wanted)) || (term.length >= 5 && wanted.includes(term))) {
-          basis = "name";
-          break;
-        }
-      }
-      if (!basis) {
-        for (const family of families) {
-          const members = CLASSES[family] ?? [];
-          if (members.some((member) => member === wanted || (member.length >= 4 && wanted.includes(member)))) {
-            basis = "class";
-            break;
-          }
-        }
-      }
+      const basis: ConflictBasis | null = sameName(drugWords, allergy.words)
+        ? "name"
+        : groups.some((group) => group.some((member) => sameName(member, allergy.words)))
+          ? "class"
+          : null;
       if (!basis) continue;
 
-      const key = `${drug.drug_name.toLowerCase()}|${allergy.toLowerCase()}`;
+      const key = `${drug.drug_name.toLowerCase()}|${allergy.raw.toLowerCase()}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      conflicts.push({ drug: drug.drug_name, allergy, basis });
+      conflicts.push({ drug: drug.drug_name, allergy: allergy.raw, basis });
     }
   }
   return conflicts;

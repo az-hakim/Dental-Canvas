@@ -17,7 +17,9 @@ See [Release process](docs/release-process.md) for how releases are cut.
   computer" (its own database, no account, what every earlier version did) or
   "Sign in to my hosted practice". Both are one `api-base` write and a reload;
   Settings → Account still switches later, and an install that already holds an
-  earlier version's records still gets the direct way in.
+  earlier version's records still gets the direct way in. The local choice now
+  says in as many words that it starts an empty practice, so a hosted clinic
+  cannot mistake a new database for its own records having disappeared.
 - **The updater feed is merged, not replaced** — the release job keeps the
   bundle-specific entries tauri-action wrote for the tag (`windows-x86_64-nsis`
   and friends), drops entries pointing at another tag, and rewrites only the
