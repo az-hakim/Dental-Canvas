@@ -72,10 +72,12 @@ describe("choosing this computer's own database", () => {
 // accepts: an install that saved a non-address would boot pointed at nothing.
 
 describe("choosing the hosted practice", () => {
-  it("has no saved choice, and no build-time address, on a fresh install", () => {
+  it("has saved nothing on a fresh install, so the build's own address applies", () => {
     installStorage();
     expect(savedApiBaseUrl()).toBeNull();
-    expect(buildTimeApiBaseUrl()).toBe("");
+    // The build may carry a hosted address — CI and the installers both set
+    // VITE_API_BASE_URL — and with nothing saved that is what the app uses.
+    expect(apiBaseUrl()).toBe(buildTimeApiBaseUrl());
   });
 
   it("saves the address the sign-in gate was given", () => {
