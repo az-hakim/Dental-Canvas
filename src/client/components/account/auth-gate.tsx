@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { HardDrive, Loader2, ShieldCheck, Stethoscope } from "lucide-react";
+import { Cloud, HardDrive, Loader2, ShieldCheck, Stethoscope } from "lucide-react";
 import { useAuth } from "@/auth";
 import { Button } from "@/components/ui/button";
 import { isTauriDesktop } from "@/offline/activate";
-import { hasLocalPracticeDatabase, useThisComputer } from "@/lib/local-practice";
+import { hasLocalPracticeDatabase, useHostedPractice, useThisComputer } from "@/lib/local-practice";
+import { buildTimeApiBaseUrl, savedApiBaseUrl } from "@/lib/api-base";
 import { AccountStep } from "./account-step";
 
 /**
@@ -13,29 +14,52 @@ import { AccountStep } from "./account-step";
  * practice can only be shown once the server knows which clinic the caller
  * belongs to. Offline and self-hosted builds never render this.
  *
- * One exception, and it is the reason this screen checks the disk: a desktop
- * install that ran its own backend before the installer started shipping
- * pointed at the hosted practice still holds that practice's database. Updating
- * into a sign-in gate with no door back to it would lock a clinic out of its
- * own records, so when such a database is found the gate offers to open it.
+ * Two things make this screen a door rather than a wall on the desktop. A
+ * fresh install has not chosen where its records live yet, so it is offered
+ * that choice: this computer (the bundled backend, no account — the behavior
+ * every earlier version had) or the hosted practice, which is only a saved
+ * api-base away. And an install that ran its own backend before the installer
+ * started shipping pointed at the hosted practice still holds that practice's
+ * database: updating into a sign-in gate with no door back to it would lock a
+ * clinic out of its own records, so when such a database is found the gate
+ * offers to open it directly.
  */
 export function AuthGate() {
   const auth = useAuth();
+  const [desktop, setDesktop] = useState(false);
   const [localPractice, setLocalPractice] = useState(false);
+  const [chooser, setChooser] = useState(false);
+  const [hostedUrl, setHostedUrl] = useState("");
+  const [hostedInvalid, setHostedInvalid] = useState(false);
 
   useEffect(() => {
     // Only a desktop shell can run the bundled backend; in a browser this
     // probe would find nothing (or, worse, a dropdown from a URL that has
     // since become the hosted practice).
     if (!isTauriDesktop()) return;
+    setDesktop(true);
+    setHostedUrl(buildTimeApiBaseUrl());
+    // Nothing saved and no database on disk: this install has never chosen.
+    setChooser(savedApiBaseUrl() === null);
     let alive = true;
     void hasLocalPracticeDatabase().then((found) => {
-      if (alive) setLocalPractice(found);
+      if (!alive) return;
+      setLocalPractice(found);
+      // Records left by an earlier version answer the question already.
+      if (found) setChooser(false);
     });
     return () => {
       alive = false;
     };
   }, []);
+
+  function chooseHosted() {
+    if (!useHostedPractice(hostedUrl)) {
+      setHostedInvalid(true);
+      return;
+    }
+    window.location.reload();
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center overflow-auto bg-gradient-to-br from-primary/10 via-background to-background p-4">
@@ -49,6 +73,55 @@ export function AuthGate() {
             <p className="text-xs text-muted-foreground">Practice management in the browser</p>
           </div>
         </div>
+
+        {desktop && chooser && (
+          <div className="mb-3 rounded-2xl border border-primary/30 bg-card/90 p-4 shadow-sm backdrop-blur">
+            <p className="flex items-center gap-2 text-sm font-medium">
+              <HardDrive className="h-4 w-4 shrink-0 text-primary" />
+              Where should this practice keep its records?
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              This installer can run the whole practice on this computer with no account, or sign
+              in to the hosted practice your clinic already uses. You can change this later in
+              Settings → Account.
+            </p>
+            <Button
+              className="mt-3 w-full gap-2 rounded-full"
+              onClick={() => {
+                useThisComputer();
+                window.location.reload();
+              }}
+            >
+              <HardDrive className="h-4 w-4" />
+              Use this computer
+            </Button>
+            <p className="mt-1.5 text-[11px] text-muted-foreground">
+              Recommended for a single computer. The database stays here and nothing is uploaded.
+            </p>
+            {!buildTimeApiBaseUrl() && (
+              <input
+                type="url"
+                value={hostedUrl}
+                onChange={(event) => {
+                  setHostedUrl(event.target.value);
+                  setHostedInvalid(false);
+                }}
+                placeholder="https://your-practice.example"
+                aria-label="Hosted practice address"
+                className="mt-2 h-9 w-full rounded-full border bg-background px-3 text-sm"
+              />
+            )}
+            <Button variant="outline" className="mt-2 w-full gap-2 rounded-full" onClick={chooseHosted}>
+              <Cloud className="h-4 w-4" />
+              Sign in to my hosted practice
+            </Button>
+            {hostedInvalid && (
+              <p className="mt-1.5 text-xs text-destructive">
+                Enter the practice's address, starting with https://
+              </p>
+            )}
+          </div>
+        )}
 
         <div className="rounded-2xl border bg-card p-6 shadow-2xl">
           {auth.status === "loading" ? (

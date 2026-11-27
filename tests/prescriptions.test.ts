@@ -24,7 +24,9 @@ async function seedPatient(overrides: Record<string, unknown> = {}) {
     first_name: "Grace",
     last_name: "Hopper",
     date_of_birth: "1990-05-10",
-    medical_alerts: "allergy:penicillin",
+    // Deliberately not a drug on rxBody's list: prescribing a chart's allergy
+    // is refused (see "prescribing against the chart's allergy tags").
+    medical_alerts: "allergy:latex",
     ...overrides,
   });
   const res = await app.request(path, init, { DB: ctx.db });
@@ -688,5 +690,98 @@ describe("practice-defined prescription templates", () => {
     expect(layouts).toHaveLength(1);
     expect(layouts[0].slug).toBe(layout.slug);
     expect(layouts[0].config).toEqual(CONFIG);
+  });
+});
+
+// ── The allergy tags on the chart ─────────────────────────────────
+//
+// A prescription is the moment a chart's `allergy:` tags have to matter. The
+// printed sheet showed them; these are the routes refusing to save a drug that
+// matches one.
+
+describe("prescribing against the chart's allergy tags", () => {
+  it("refuses a drug that matches an allergy tag, and saves nothing", async () => {
+    const pid = await seedPatient({ medical_alerts: "allergy:penicillin" });
+    const { path, init } = jsonRequest("POST", "/api/prescriptions", rxBody(pid));
+    const res = await app.request(path, init, { DB: ctx.db });
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as {
+      error: string;
+      conflicts: { drug: string; allergy: string; basis: string }[];
+    };
+    expect(body.error).toContain("Allergy conflict");
+    expect(body.error).toContain("Amoxicillin");
+    expect(body.conflicts).toEqual([
+      { drug: "Amoxicillin", allergy: "penicillin", basis: "class" },
+    ]);
+
+    // Nothing reached the chart: no prescription row, and no items behind it.
+    const list = await app.request(`/api/patients/${pid}/prescriptions`, undefined, { DB: ctx.db });
+    const { prescriptions } = (await list.json()) as { prescriptions: unknown[] };
+    expect(prescriptions).toHaveLength(0);
+  });
+
+  it("saves the same prescription when no drug is on the chart", async () => {
+    const pid = await seedPatient({ medical_alerts: "allergy:penicillin" });
+    const { path, init } = jsonRequest(
+      "POST",
+      "/api/prescriptions",
+      rxBody(pid, {
+        items: [
+          { drug_name: "Clindamycin", dosage: "300 mg", frequency: "3x daily", duration: "5 days", instructions: null },
+        ],
+      }),
+    );
+    expect((await app.request(path, init, { DB: ctx.db })).status).toBe(201);
+  });
+
+  it("takes an explicit acknowledgement, so a stale tag can be prescribed through", async () => {
+    const pid = await seedPatient({ medical_alerts: "allergy:penicillin" });
+    const { path, init } = jsonRequest("POST", "/api/prescriptions", rxBody(pid, { acknowledge_allergy: true }));
+    expect((await app.request(path, init, { DB: ctx.db })).status).toBe(201);
+  });
+
+  it("checks the drugs an edit puts on an existing prescription", async () => {
+    const pid = await seedPatient({ medical_alerts: "allergy:latex" });
+    const created = jsonRequest("POST", "/api/prescriptions", rxBody(pid));
+    const createdRes = await app.request(created.path, created.init, { DB: ctx.db });
+    expect(createdRes.status).toBe(201);
+    const { prescription } = (await createdRes.json()) as { prescription: { id: number } };
+
+    // The chart learns about the penicillin allergy between visits.
+    const updPatient = jsonRequest("PUT", `/api/patients/${pid}`, { medical_alerts: "allergy:penicillin" });
+    expect((await app.request(updPatient.path, updPatient.init, { DB: ctx.db })).status).toBe(200);
+
+    const bad = jsonRequest("PUT", `/api/prescriptions/${prescription.id}`, {
+      items: [
+        { drug_name: "Amoxicillin", dosage: "500 mg", frequency: "3x daily", duration: "5 days", instructions: null },
+      ],
+    });
+    expect((await app.request(bad.path, bad.init, { DB: ctx.db })).status).toBe(409);
+
+    // The refusal came before the items were replaced, so the old ones stand.
+    const after = await app.request(`/api/prescriptions/${prescription.id}`, undefined, { DB: ctx.db });
+    const { prescription: kept } = (await after.json()) as { prescription: { items: { drug_name: string }[] } };
+    expect(kept.items.map((item) => item.drug_name)).toEqual(["Amoxicillin", "Ibuprofen"]);
+  });
+
+  it("leaves an edit that does not touch the drugs alone", async () => {
+    const pid = await seedPatient({ medical_alerts: "allergy:penicillin" });
+    const created = jsonRequest(
+      "POST",
+      "/api/prescriptions",
+      rxBody(pid, {
+        items: [
+          { drug_name: "Clindamycin", dosage: "300 mg", frequency: "3x daily", duration: "5 days", instructions: null },
+        ],
+      }),
+    );
+    const createdRes = await app.request(created.path, created.init, { DB: ctx.db });
+    const { prescription } = (await createdRes.json()) as { prescription: { id: number } };
+
+    const advice = jsonRequest("PUT", `/api/prescriptions/${prescription.id}`, {
+      advice: "Soft diet for 3 days.",
+    });
+    expect((await app.request(advice.path, advice.init, { DB: ctx.db })).status).toBe(200);
   });
 });

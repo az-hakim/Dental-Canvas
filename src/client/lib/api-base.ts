@@ -30,17 +30,36 @@ function normalize(url: string): string {
 }
 
 /**
+ * The server URL this build was compiled with (`VITE_API_BASE_URL`), or ""
+ * when it has none. The installers are built pointed at the hosted practice,
+ * so on a fresh install this is the hosted address the sign-in gate offers.
+ */
+export function buildTimeApiBaseUrl(): string {
+  return normalize(env("VITE_API_BASE_URL") ?? "");
+}
+
+/**
+ * The override saved on this computer, exactly as saved: a server URL, "" for
+ * this computer's own database, or null when nothing has been chosen yet (so
+ * the build-time URL applies). The sign-in gate uses the null case to know a
+ * desktop install has not been through the first-run choice.
+ */
+export function savedApiBaseUrl(): string | null {
+  try {
+    const stored = window.localStorage.getItem(STORAGE_KEY);
+    return stored === null ? null : normalize(stored);
+  } catch {
+    /* private mode — behave as though nothing was saved */
+    return null;
+  }
+}
+
+/**
  * The saved override when there is one — a server URL, or "" for this
  * computer's own database — else the URL the build was compiled with.
  */
 export function apiBaseUrl(): string {
-  try {
-    const stored = window.localStorage.getItem(STORAGE_KEY);
-    if (stored !== null) return normalize(stored);
-  } catch {
-    /* private mode — fall through to the build-time value */
-  }
-  return normalize(env("VITE_API_BASE_URL") ?? "");
+  return savedApiBaseUrl() ?? buildTimeApiBaseUrl();
 }
 
 /**

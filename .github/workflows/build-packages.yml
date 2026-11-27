@@ -83,7 +83,10 @@ jobs:
         run: node scripts/check-release-versions.mjs --expect-tag "$GITHUB_REF_NAME"
 
       - name: Build and publish Windows installer
-        uses: tauri-apps/tauri-action@v0
+        # Pinned by tag: `@v0` moves under us, and a release build is not the
+        # place to find out what changed. retryAttempts covers the upload race
+        # below (the action re-fetches the draft release and its latest.json).
+        uses: tauri-apps/tauri-action@v1.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Signs the update bundle (.sig) for the in-app updater. The public
@@ -101,7 +104,7 @@ jobs:
             - **macOS** — `..._aarch64.appdmg` (Apple Silicon) — unsigned: right-click → Open on first launch
             - **Android** — `...-universal.apk` (sideload; enable "install unknown apps")
 
-            The desktop app is a native shell over the hosted practice: sign in with the same account as the web app and the clinic's records are there — no local database to keep in sync. In-app updates are signed and install themselves at a quiet moment. Installers are not code-signed.
+            On first launch the app asks where this practice keeps its records: on this computer (its own database, no account needed) or in the hosted practice, signed in with the same account as the web app. Either way the shell runs the same app, and Settings → Account switches later. In-app updates are signed and install themselves at a quiet moment. Installers are not code-signed.
 
             See README.md for setup and limitations.
           # Draft until the verify-and-publish job has checked every package's
@@ -112,6 +115,8 @@ jobs:
           # tauri.conf.json point at releases/latest/download/latest.json) and
           # prefer the NSIS setup.exe (the only bundle we ship) as the payload.
           updaterJsonPreferNsis: true
+          # Retries the release fetch and asset upload, not just the build.
+          retryAttempts: 5
           args: --target x86_64-pc-windows-msvc --bundles nsis
 
   # ── Linux desktop packages (deb / rpm / AppImage) ───────────────────
@@ -157,7 +162,10 @@ jobs:
         run: node scripts/check-release-versions.mjs --expect-tag "$GITHUB_REF_NAME"
 
       - name: Build Linux packages
-        uses: tauri-apps/tauri-action@v0
+        # Pinned by tag: `@v0` moves under us, and a release build is not the
+        # place to find out what changed. retryAttempts covers the upload race
+        # below (the action re-fetches the draft release and its latest.json).
+        uses: tauri-apps/tauri-action@v1.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -170,6 +178,7 @@ jobs:
             Fedora/openSUSE, `.AppImage` for everything else.
           releaseDraft: true
           prerelease: ${{ contains(github.ref_name, '-') }}
+          retryAttempts: 5
           args: --bundles deb,rpm,appimage
 
   # ── macOS DMG (Apple Silicon) ───────────────────────────────────────
@@ -213,7 +222,10 @@ jobs:
         run: node scripts/check-release-versions.mjs --expect-tag "$GITHUB_REF_NAME"
 
       - name: Build and publish macOS DMG
-        uses: tauri-apps/tauri-action@v0
+        # Pinned by tag: `@v0` moves under us, and a release build is not the
+        # place to find out what changed. retryAttempts covers the upload race
+        # below (the action re-fetches the draft release and its latest.json).
+        uses: tauri-apps/tauri-action@v1.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -226,6 +238,7 @@ jobs:
             the app and choose Open, or run `xattr -cr /Applications/Dental\ Canvas.app`.
           releaseDraft: true
           prerelease: ${{ contains(github.ref_name, '-') }}
+          retryAttempts: 5
           args: --target aarch64-apple-darwin --bundles dmg
 
   # ── Android APK ─────────────────────────────────────────────────────
@@ -704,12 +717,14 @@ jobs:
           fi
           echo "release notes: $(wc -c < release-notes.md) bytes"
 
-      # tauri-action writes a latest.json from each platform job, and the
-      # Windows, Linux and macOS jobs upload concurrently to the same draft
-      # release — whichever finishes last wins. A feed without
-      # `windows-x86_64` makes the installed Windows app report "no update"
-      # forever. Build the feed once here, from the assets that really exist,
-      # and clobber whatever the build jobs wrote.
+      # tauri-action writes a latest.json from each platform job by
+      # read-modify-write (fetch, merge this platform, delete + upload), which
+      # is not atomic across the concurrent Windows, Linux and macOS jobs: a
+      # lost update leaves a feed without `windows-x86_64`, and that installed
+      # Windows app reports "no update" forever. Build the feed once here from
+      # the assets that really exist, merging onto the action's feed so its
+      # bundle-specific entries (`windows-x86_64-nsis` etc.) survive, and
+      # clobber whatever the build jobs wrote.
       - name: Build the updater feed from the published packages
         run: |
           node scripts/build-latest-json.mjs \

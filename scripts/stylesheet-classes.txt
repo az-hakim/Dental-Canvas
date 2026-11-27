@@ -6,8 +6,8 @@
 # @source roots in src/client/styles.css (they must stay src/ and
 # index.html) and look for stray files inside src/.
 #
-# source: main @ c780ae7 (2026-11-26)
-# classes: 1661
+# source: main @ 6717fbe (2026-11-27)
+# classes: 1662
 -bottom-10
 -bottom-6
 -bottom-9
@@ -87,6 +87,7 @@ bg-card/60
 bg-card/70
 bg-card/80
 bg-card/85
+bg-card/90
 bg-destructive
 bg-emerald-100
 bg-emerald-100/70

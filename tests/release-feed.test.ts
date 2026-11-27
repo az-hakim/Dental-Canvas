@@ -100,6 +100,56 @@ describe("the updater feed", () => {
     expect(run.status).toBe(1);
     expect(run.stderr).toContain("does not exist");
   });
+
+  // tauri-action writes the same feed from every platform job, keyed by bundle
+  // (`windows-x86_64-nsis`, `linux-x86_64-appimage`) rather than by the artifact
+  // the updater installs. Replacing that file outright would drop those entries;
+  // merging keeps them, without carrying another release's entries forward.
+  it("merges onto the feed tauri-action wrote, keeping this tag's other entries", () => {
+    const dir = temporaryDir();
+    writePackages(dir);
+    const base = "https://github.com/az-hakim/Dental-Canvas/releases/download/v1.5.0";
+    writeFileSync(
+      path.join(dir, "latest.json"),
+      JSON.stringify({
+        version: "1.5.0",
+        notes: "what the last platform job happened to write",
+        pub_date: "2026-11-01T00:00:00Z",
+        platforms: {
+          "windows-x86_64-nsis": { signature: "sig-nsis", url: `${base}/Dental%20Canvas_1.5.0_x64-setup.exe` },
+          "linux-x86_64-appimage": { signature: "sig-appimage", url: `${base}/Dental%20Canvas_1.5.0_amd64.AppImage` },
+          "darwin-aarch64": { signature: "sig-darwin", url: `${base}/Dental%20Canvas_1.5.0_aarch64.app.tar.gz` },
+          // Last release's binary: never carried into this one's feed.
+          "windows-x86_64-msi": {
+            signature: "old-sig",
+            url: "https://github.com/az-hakim/Dental-Canvas/releases/download/v1.4.9/Dental%20Canvas_1.4.9_x64_en-US.msi",
+          },
+        },
+      }),
+    );
+    const notesPath = path.join(dir, "release-notes.md");
+    writeFileSync(notesPath, "- **Allergy checks** on every prescription.\n");
+
+    const run = buildFeed(dir, ["--notes-file", notesPath]);
+    expect(run.stderr).toBe("");
+    expect(run.status).toBe(0);
+
+    const feed = JSON.parse(readFileSync(path.join(dir, "latest.json"), "utf8"));
+    expect(Object.keys(feed.platforms).sort()).toEqual([
+      "darwin-aarch64",
+      "linux-x86_64",
+      "linux-x86_64-appimage",
+      "windows-x86_64",
+      "windows-x86_64-nsis",
+    ]);
+    // The entries this release's own packages prove win over the action's.
+    expect(feed.platforms["windows-x86_64"].url.endsWith("-setup.exe")).toBe(true);
+    expect(feed.platforms["windows-x86_64"].signature).toBe(
+      "signature-for-Dental Canvas_1.5.0_x64-setup.exe",
+    );
+    expect(feed.notes).toBe("- **Allergy checks** on every prescription.");
+    expect(feed.version).toBe("1.5.0");
+  });
 });
 
 describe("release notes from the changelog", () => {

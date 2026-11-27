@@ -261,6 +261,9 @@ interface DraftItem {
 
 const EMPTY_ITEM: DraftItem = { drug_name: "", dosage: "", frequency: "", duration: "", instructions: "" };
 
+/** How the server opens its 409 for a drug that matches a chart allergy tag. */
+const ALLERGY_REFUSAL_PREFIX = "Allergy conflict:";
+
 /**
  * The prescription editor dialog. Exported so the dashboard's consultation
  * card can mount the same editor for issuing a prescription mid-visit.
@@ -394,6 +397,14 @@ export function PrescriptionDialog({
   const [followUp, setFollowUp] = useState("");
   const [items, setItems] = useState<DraftItem[]>([{ ...EMPTY_ITEM }]);
   const [saving, setSaving] = useState(false);
+  // The save the allergy guard refused, kept whole so "prescribe anyway"
+  // resends exactly the drugs that were reviewed rather than re-reading a form
+  // the prescriber may have edited in the meantime.
+  const [allergyRefusal, setAllergyRefusal] = useState<{
+    message: string;
+    body: Record<string, unknown>;
+    thenPrint: boolean;
+  } | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   // Images attachable to the sheet (X-ray/intraoral/panoramic on file) and the
   // ids currently selected to print on it.
@@ -617,6 +628,50 @@ export function PrescriptionDialog({
     if (draftSheetData()) setPreviewOpen(true);
   }
 
+  /**
+   * Write the draft. `acknowledgeAllergy` is only ever true after the
+   * prescriber saw the conflict dialog below and chose to continue: the server
+   * refuses a drug matching a chart allergy unless the request says so.
+   */
+  async function submitPrescription(
+    body: Record<string, unknown>,
+    thenPrint: boolean,
+    acknowledgeAllergy = false,
+  ) {
+    setSaving(true);
+    try {
+      const payload = acknowledgeAllergy ? { ...body, acknowledge_allergy: true } : body;
+      // The count reported is the one in the body, which is what was sent.
+      const count = (body.items as unknown[] | undefined)?.length ?? 0;
+      // Duplicate mode passes prescription=null, so this naturally creates a new record.
+      const res =
+        isEdit && !duplicateOf
+          ? await api<{ prescription: Prescription }>("PUT", `/api/prescriptions/${prescription!.id}`, payload)
+          : await api<{ prescription: Prescription }>("POST", "/api/prescriptions", payload);
+      toast.success(
+        isEdit && !duplicateOf
+          ? "Prescription updated"
+          : `Prescription issued with ${count} medication${count === 1 ? "" : "s"}`,
+      );
+      onSaved();
+      if (thenPrint) onOpenPrint(res.prescription.id);
+    } catch (err) {
+      const message = (err as Error).message;
+      // The allergy guard answers 409 with a message naming the drug and the
+      // tag. `api()` surfaces that message without the status code, so its
+      // opening words are the signal: ask once instead of showing a toast the
+      // prescriber has no way to act on.
+      if (message.startsWith(ALLERGY_REFUSAL_PREFIX)) {
+        setAllergyRefusal({ message, body, thenPrint });
+        return;
+      }
+      toast.error(message);
+      app.setError(message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function save(e: React.FormEvent, thenPrint: boolean) {
     e.preventDefault();
     const valid = items.filter((i) => i.drug_name.trim());
@@ -624,48 +679,29 @@ export function PrescriptionDialog({
       app.setError("Add at least one medication with a drug name.");
       return;
     }
-    setSaving(true);
-    try {
-      const body = {
-        patient_id: patientId,
-        practitioner_id: practitionerId === "none" ? null : Number(practitionerId),
-        issued_date: issuedDate || null,
-        template,
-        large_print: largePrint,
-        tooth: tooth.trim() || null,
-        plan_item_id: planItemId === "none" ? null : Number(planItemId),
-        diagnosis: diagnosis.trim() || null,
-        on_examination: onExamination.trim() || null,
-        history: history.trim() || null,
-        advice: advice.trim() || null,
-        follow_up: followUp.trim() || null,
-        image_ids: imageIds,
-        items: valid.map((i) => ({
-          drug_name: i.drug_name.trim(),
-          dosage: i.dosage.trim() || null,
-          frequency: i.frequency.trim() || null,
-          duration: i.duration.trim() || null,
-          instructions: i.instructions.trim() || null,
-        })),
-      };
-      // Duplicate mode passes prescription=null, so this naturally creates a new record.
-      const res =
-        isEdit && !duplicateOf
-          ? await api<{ prescription: Prescription }>("PUT", `/api/prescriptions/${prescription!.id}`, body)
-          : await api<{ prescription: Prescription }>("POST", "/api/prescriptions", body);
-      toast.success(
-        isEdit && !duplicateOf
-          ? "Prescription updated"
-          : `Prescription issued with ${valid.length} medication${valid.length === 1 ? "" : "s"}`,
-      );
-      onSaved();
-      if (thenPrint) onOpenPrint(res.prescription.id);
-    } catch (err) {
-      toast.error((err as Error).message);
-      app.setError((err as Error).message);
-    } finally {
-      setSaving(false);
-    }
+    const body: Record<string, unknown> = {
+      patient_id: patientId,
+      practitioner_id: practitionerId === "none" ? null : Number(practitionerId),
+      issued_date: issuedDate || null,
+      template,
+      large_print: largePrint,
+      tooth: tooth.trim() || null,
+      plan_item_id: planItemId === "none" ? null : Number(planItemId),
+      diagnosis: diagnosis.trim() || null,
+      on_examination: onExamination.trim() || null,
+      history: history.trim() || null,
+      advice: advice.trim() || null,
+      follow_up: followUp.trim() || null,
+      image_ids: imageIds,
+      items: valid.map((i) => ({
+        drug_name: i.drug_name.trim(),
+        dosage: i.dosage.trim() || null,
+        frequency: i.frequency.trim() || null,
+        duration: i.duration.trim() || null,
+        instructions: i.instructions.trim() || null,
+      })),
+    };
+    await submitPrescription(body, thenPrint);
   }
 
   return (
@@ -951,6 +987,50 @@ export function PrescriptionDialog({
             </Button>
           </DialogFooter>
         </form>
+
+        {/* The chart's `allergy:` tags refused this prescription (409). Going
+            ahead is still allowed — the tag may be stale, or this may be a
+            deliberate desensitisation — but only by saying so explicitly. */}
+        <Dialog
+          open={allergyRefusal !== null}
+          onOpenChange={(o) => {
+            if (!o) setAllergyRefusal(null);
+          }}
+        >
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Allergy conflict on this prescription</DialogTitle>
+              <DialogDescription>
+                This patient's chart lists an allergy that matches a drug on this prescription. Nothing has
+                been saved.
+              </DialogDescription>
+            </DialogHeader>
+            <p className="text-sm text-muted-foreground">{allergyRefusal?.message}</p>
+            <DialogFooter className="gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={saving}
+                onClick={() => setAllergyRefusal(null)}
+              >
+                Change the drug
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={saving}
+                onClick={() => {
+                  const refused = allergyRefusal;
+                  if (!refused) return;
+                  setAllergyRefusal(null);
+                  void submitPrescription(refused.body, refused.thenPrint, true);
+                }}
+              >
+                Prescribe anyway
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {previewOpen && draftSheetData() && (
           <PrescriptionPreviewModal

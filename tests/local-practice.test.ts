@@ -1,8 +1,14 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { apiBaseUrl, setApiBaseUrl } from "../src/client/lib/api-base";
+import {
+  apiBaseUrl,
+  buildTimeApiBaseUrl,
+  savedApiBaseUrl,
+  setApiBaseUrl,
+} from "../src/client/lib/api-base";
 import {
   LOCAL_DB_NAME,
   hasLocalPracticeDatabase,
+  useHostedPractice,
   useThisComputer,
 } from "../src/client/lib/local-practice";
 
@@ -55,6 +61,37 @@ describe("choosing this computer's own database", () => {
     setApiBaseUrl("https://clinic.example");
     setApiBaseUrl(null);
     expect(store.has(STORAGE_KEY)).toBe(false);
+  });
+});
+
+// ── The other half of the first-run choice ────────────────────────
+//
+// The gate offers "this computer" (the bare backend) or the hosted practice.
+// The second choice is only an api-base write, so these pin down what it
+// accepts: an install that saved a non-address would boot pointed at nothing.
+
+describe("choosing the hosted practice", () => {
+  it("has no saved choice, and no build-time address, on a fresh install", () => {
+    installStorage();
+    expect(savedApiBaseUrl()).toBeNull();
+    expect(buildTimeApiBaseUrl()).toBe("");
+  });
+
+  it("saves the address the sign-in gate was given", () => {
+    const store = installStorage();
+    expect(useHostedPractice(" https://clinic.example/ ")).toBe(true);
+    expect(apiBaseUrl()).toBe("https://clinic.example");
+    expect(savedApiBaseUrl()).toBe("https://clinic.example");
+    expect(store.get(STORAGE_KEY)).toBe("https://clinic.example");
+  });
+
+  it("refuses anything that is not an http(s) address", () => {
+    const store = installStorage();
+    for (const bad of ["", "   ", "clinic.example", "ftp://clinic.example", "file:///etc/passwd"]) {
+      expect(useHostedPractice(bad), bad).toBe(false);
+    }
+    expect(store.has(STORAGE_KEY)).toBe(false);
+    expect(savedApiBaseUrl()).toBeNull();
   });
 });
 

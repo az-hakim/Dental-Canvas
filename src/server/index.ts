@@ -28,6 +28,7 @@ import {
   INVOICE_STYLE_IDS,
 } from "./seed";
 import { reindexSearchIndex, searchAll } from "./search";
+import { allergyConflictMessage, findAllergyConflicts } from "./rx-allergy";
 import {
   MAX_PATIENT_IMPORT_BYTES,
   MAX_IMPORT_ROWS,
@@ -1239,6 +1240,10 @@ const PrescriptionInput = z.object({
   complaints: z.string().optional().nullable(),
   vitals: z.string().optional().nullable(),
   investigations: z.string().optional().nullable(),
+  // Set only to prescribe through a named allergy on purpose (the chart's tag
+  // is out of date, or a deliberate desensitisation plan). The viewer has to
+  // say so; leaving it out is refused with the conflict named.
+  acknowledge_allergy: z.boolean().optional(),
   items: z
     .array(
       z.object({
@@ -1709,6 +1714,17 @@ app.post("/api/prescriptions", async (c) => {
   if (d.template !== undefined && !(await isKnownTemplateId(d.template))) {
     return c.json({ error: "Unknown prescription template" }, 400);
   }
+  // The chart's allergy tags are enforced here, not left to the printed sheet:
+  // a drug whose name or family matches `allergy:<name>` is refused unless
+  // the caller explicitly acknowledges it.
+  if (!d.acknowledge_allergy) {
+    const patient = await get<{ medical_alerts: string | null }>(
+      "SELECT medical_alerts FROM patients WHERE id = ?",
+      [d.patient_id],
+    );
+    const conflicts = findAllergyConflicts(patient?.medical_alerts ?? null, d.items);
+    if (conflicts.length) return c.json({ error: allergyConflictMessage(conflicts), conflicts }, 409);
+  }
   const result = await run(
     `INSERT INTO prescriptions (patient_id, practitioner_id, issued_date, template, large_print, tooth, plan_item_id, diagnosis, on_examination, history, advice, follow_up, follow_up_date, patient_gender, complaints, vitals, investigations)
      VALUES (?, ?, COALESCE(?, date('now')), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -1754,6 +1770,16 @@ app.put("/api/prescriptions/:id", async (c) => {
   if (!existing) return c.json({ error: "Not found" }, 404);
   if (d.template !== undefined && !(await isKnownTemplateId(d.template))) {
     return c.json({ error: "Unknown prescription template" }, 400);
+  }
+  // Editing the drugs onto a chart is the same prescribing decision as
+  // creating it, so the allergy tags are checked here too.
+  if (d.items !== undefined && !d.acknowledge_allergy) {
+    const patient = await get<{ medical_alerts: string | null }>(
+      "SELECT medical_alerts FROM patients WHERE id = ?",
+      [existing.patient_id],
+    );
+    const conflicts = findAllergyConflicts(patient?.medical_alerts ?? null, d.items);
+    if (conflicts.length) return c.json({ error: allergyConflictMessage(conflicts), conflicts }, 409);
   }
 
   const sets: string[] = [];

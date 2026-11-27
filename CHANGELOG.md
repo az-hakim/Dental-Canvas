@@ -3,6 +3,27 @@
 All notable changes to this project will be documented in this file.
 See [Release process](docs/release-process.md) for how releases are cut.
 
+## Unreleased
+
+- **Allergy tags are enforced when prescribing** — saving a prescription whose
+  drug matches an `allergy:<name>` tag on the patient is refused, with the
+  conflict named, on both create and edit. Matching is by the drug's name, a
+  brand name it stands for (Augmentin → amoxicillin), or its family (penicillin
+  → amoxicillin, NSAID → ibuprofen); a deliberate override is an explicit
+  `acknowledge_allergy` on the request. The editor turns that refusal into a
+  "Prescribe anyway" confirmation that resends the same prescription with the
+  acknowledgement. The printed sheet still carries the alerts.
+- **The installer asks where the practice lives on first launch** — "Use this
+  computer" (its own database, no account, what every earlier version did) or
+  "Sign in to my hosted practice". Both are one `api-base` write and a reload;
+  Settings → Account still switches later, and an install that already holds an
+  earlier version's records still gets the direct way in.
+- **The updater feed is merged, not replaced** — the release job keeps the
+  bundle-specific entries tauri-action wrote for the tag (`windows-x86_64-nsis`
+  and friends), drops entries pointing at another tag, and rewrites only the
+  entries this release's signed packages prove. The packaging action is pinned
+  at `v1.0.0` with `retryAttempts: 5` instead of moving `@v0`.
+
 ## v1.5.0
 
 - **Hosted web app** — the same app now runs as a multi-tenant web service

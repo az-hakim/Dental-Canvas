@@ -3,17 +3,24 @@
  * Build `latest.json` — the feed the in-app updater reads — from the packages
  * that are actually attached to a release.
  *
- * tauri-action writes its own `latest.json` from **each** platform job, and the
- * Windows, Linux and macOS jobs run concurrently against the same draft
- * release. Whichever job uploads last wins, so the published feed can list only
- * that platform. A Windows install then finds no `windows-x86_64` entry, the
- * plugin reports "no update available", and the machine silently stays on its
- * old version forever — indistinguishable from "there is no update".
+ * tauri-action writes `latest.json` too, from every platform job, into the same
+ * draft release: it fetches the asset, merges this job's platform in, then
+ * deletes and re-uploads it. That read-modify-write is not atomic, and the
+ * Windows, Linux and macOS jobs run concurrently, so a lost update is still
+ * possible (its retries make it unlikely, not impossible). Its entries are also
+ * keyed by bundle — `windows-x86_64-nsis`, `linux-x86_64-appimage` — rather
+ * than by the artifact the updater installs. A feed left without
+ * `windows-x86_64` makes a Windows install report "no update available"
+ * forever, which looks exactly like "there is no update".
  *
- * So the release job builds the feed once, after every package has been
- * downloaded, from the files that are really there, and uploads it with
- * `--clobber` before the release is published. Signatures come from the `.sig`
- * files tauri-action wrote, so a package without one cannot enter the feed.
+ * So the release job also builds the feed once, after every package has been
+ * downloaded, and uploads it with `--clobber` before the release is published.
+ * It starts from the feed the action produced — keeping the bundle-specific
+ * entries this script cannot prove — rewrites version, notes and pub_date, and
+ * replaces the platform entries whose signed package is actually here.
+ * Entries that point at another tag are dropped, so a feed can never offer the
+ * previous release's binary. Signatures come from the `.sig` files
+ * tauri-action wrote, so a package without one cannot enter the feed.
  *
  *   node scripts/build-latest-json.mjs \
  *     --dir verify --version 1.5.0 --tag v1.5.0 \
@@ -94,6 +101,36 @@ function readNotes(args) {
   return trimmed;
 }
 
+/**
+ * The feed tauri-action left on the release, split into the entries this
+ * release can keep and the rest of its top level. Only entries that point at
+ * this tag survive: a feed must never carry last release's artifacts forward.
+ */
+function readExistingFeed(outPath, tag, repo) {
+  if (!existsSync(outPath)) return { extraTop: {}, entries: {} };
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync(outPath, "utf8"));
+  } catch {
+    return { extraTop: {}, entries: {} };
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { extraTop: {}, entries: {} };
+  }
+  const prefix = `https://github.com/${repo}/releases/download/${tag}/`;
+  const source = parsed.platforms && typeof parsed.platforms === "object" ? parsed.platforms : {};
+  const entries = {};
+  for (const [key, entry] of Object.entries(source)) {
+    if (!entry || typeof entry !== "object") continue;
+    if (typeof entry.url !== "string" || !entry.url.startsWith(prefix)) continue;
+    if (typeof entry.signature !== "string" || !entry.signature.trim()) continue;
+    entries[key] = entry;
+  }
+  const extraTop = { ...parsed };
+  for (const key of ["platforms", "version", "notes", "pub_date"]) delete extraTop[key];
+  return { extraTop, entries };
+}
+
 function main() {
   const args = parseArgs(process.argv.slice(2));
   if (!args.version || !args.tag || !args.repo) {
@@ -132,19 +169,26 @@ function main() {
     throw new Error(`no signed packages found in ${dir}`);
   }
 
+  const out = path.resolve(args.out ?? path.join(dir, "latest.json"));
+  const { extraTop, entries } = readExistingFeed(out, args.tag, args.repo);
+  const kept = Object.keys(entries).filter((key) => !(key in platforms));
+
   const feed = {
+    ...extraTop,
     version: args.version.replace(/^v/i, ""),
     notes,
     pub_date: new Date().toISOString(),
-    platforms,
+    // The entries the packages prove replace the action's; everything else the
+    // action wrote for this tag is kept.
+    platforms: { ...entries, ...platforms },
   };
 
-  const out = path.resolve(args.out ?? path.join(dir, "latest.json"));
   writeFileSync(out, `${JSON.stringify(feed, null, 2)}\n`);
 
   console.log(`wrote ${out}`);
   console.log(`  version ${feed.version}`);
   console.log(`  notes   ${notes.length} chars`);
+  if (kept.length) console.log(`  kept    ${kept.join(", ")} (from the feed tauri-action wrote)`);
   for (const [key, entry] of Object.entries(platforms)) {
     console.log(`  ${key.padEnd(16)} ${entry.url.split("/").pop()} (signed)`);
   }

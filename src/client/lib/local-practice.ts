@@ -86,3 +86,16 @@ export async function hasLocalPracticeDatabase(factory: IdbFactoryLike | null = 
 export function useThisComputer(): void {
   setApiBaseUrl("");
 }
+
+/**
+ * Point this install at a hosted practice — the other half of the same choice.
+ * Returns false and changes nothing unless `url` is an http(s) address, so a
+ * typo cannot leave the shell pointed at something that is not a server at all.
+ * Caller reloads, because the shell picks its backend at boot.
+ */
+export function useHostedPractice(url: string): boolean {
+  const trimmed = url.trim().replace(/\/+$/, "");
+  if (!/^https?:\/\/[^\s/]+/i.test(trimmed)) return false;
+  setApiBaseUrl(trimmed);
+  return true;
+}
