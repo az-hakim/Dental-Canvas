@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Copy, Eye, FileText, Link, Plus, Printer, Trash2 } from "lucide-react";
 import { api } from "@/api";
+import { useAuthImageSrc } from "@/lib/images";
 import { useApp } from "@/context";
 import { toast } from "@/components/ui/toast";
 import type {
@@ -841,13 +842,7 @@ export function PrescriptionDialog({
                           : "relative overflow-hidden rounded-md border-2 border-transparent opacity-60 hover:opacity-100"
                       }
                     >
-                      {img.url ? (
-                        <img src={img.url} alt={img.label || img.file_name || "X-ray"} className="h-16 w-20 object-cover" />
-                      ) : (
-                        <div className="flex h-16 w-20 items-center justify-center bg-muted text-[10px] text-muted-foreground">
-                          {img.kind === "xray" ? "X-ray" : img.kind}
-                        </div>
-                      )}
+                      <AttachThumb image={img} />
                       {on && (
                         <span className="absolute inset-0 flex items-center justify-center bg-primary/20 text-xs font-bold text-white">
                           ✓
@@ -1044,5 +1039,23 @@ export function PrescriptionDialog({
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * One X-ray/intraoral thumbnail in the attach list. DB-backed images are
+ * served by this app's API, which needs the session, so the bytes are fetched
+ * with the token instead of pointing an <img> at the URL directly.
+ */
+function AttachThumb({ image }: { image: PatientImage }) {
+  const src = useAuthImageSrc(image.url);
+  const label = image.label || image.file_name || "X-ray";
+  if (src) {
+    return <img src={src} alt={label} className="h-16 w-20 object-cover" />;
+  }
+  return (
+    <div className="flex h-16 w-20 items-center justify-center bg-muted text-[10px] text-muted-foreground">
+      {image.kind === "xray" ? "X-ray" : image.kind}
+    </div>
   );
 }

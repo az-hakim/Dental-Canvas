@@ -37,8 +37,8 @@ export function ServerConnectionCard() {
         </CardTitle>
         <p className="text-sm text-muted-foreground">
           {current
-            ? "This app reads and writes practice data on the server below."
-            : "This app uses its own local backend. Connect it to a hosted practice to share data with the web app."}
+            ? "This app reads and writes practice data on the server below and signs in with that practice's account."
+            : "This app uses its own local backend. Connect it to your hosted web practice to sign in with the same account you use in the browser, and share the same patients and appointments."}
         </p>
       </CardHeader>
       <CardContent className="space-y-3">

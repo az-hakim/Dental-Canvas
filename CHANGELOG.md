@@ -5,6 +5,13 @@ See [Release process](docs/release-process.md) for how releases are cut.
 
 ## Unreleased
 
+- **X-ray uploads work on the hosted practice again** — the built-in image
+  store serves bytes from the app's own API, which answers only for the
+  signed-in clinic; the uploader and every thumbnail pointed at it without the
+  session, so an upload came back 401 and the gallery stayed empty. Image
+  uploads, gallery and viewer thumbnails, side-by-side compare and the
+  prescription editor's attach chips now fetch those bytes with the session
+  (presigned bucket URLs still go to the bucket, never carrying it).
 - **Allergy tags are enforced when prescribing** — saving a prescription whose
   drug matches an `allergy:<name>` tag on the patient is refused, with the
   conflict named, on both create and edit. Matching is by the drug's name, a
